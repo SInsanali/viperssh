@@ -1,0 +1,181 @@
+#!/bin/bash
+# ViperSSH - TUI SSH Connection Manager
+# This wrapper script activates the venv and runs viper.py
+
+# Resolve symlinks to get the real script directory
+SOURCE="${BASH_SOURCE[0]}"
+while [[ -L "$SOURCE" ]]; do
+    DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+    SOURCE="$(readlink "$SOURCE")"
+    [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+VENV_DIR="$SCRIPT_DIR/venv"
+MARKER_FILE="$SCRIPT_DIR/.viperssh_initialized"
+
+# Colors
+GREEN='\033[1;32m'
+CYAN='\033[1;36m'
+MAGENTA='\033[1;35m'
+DIM='\033[2m'
+RESET='\033[0m'
+
+# Run command with sudo if directory is not writable
+run_cmd() {
+    local target_dir="$1"
+    shift
+    if [[ -w "$target_dir" ]]; then
+        "$@"
+    else
+        sudo "$@"
+    fi
+}
+
+# Create and verify symlink
+create_symlink() {
+    local target_dir="$1"
+    local link_name="$2"
+    local link_path="$target_dir/$link_name"
+
+    if [[ ! -w "$target_dir" ]]; then
+        echo -e "${MAGENTA}   Requires sudo - you may be prompted for your password${RESET}"
+    fi
+
+    # Handle existing path
+    if [[ -e "$link_path" ]] || [[ -L "$link_path" ]]; then
+        if [[ -d "$link_path" ]] && [[ ! -L "$link_path" ]]; then
+            echo -e "${MAGENTA}>> $link_path is a directory, cannot overwrite${RESET}"
+            return 1
+        fi
+
+        echo -e "${MAGENTA}>> $link_path already exists${RESET}"
+        read -p "   Overwrite? [y/N]: " overwrite
+        [[ "$overwrite" != "y" && "$overwrite" != "Y" ]] && return 1
+        run_cmd "$target_dir" rm -f "$link_path"
+    fi
+
+    # Create and verify symlink
+    if run_cmd "$target_dir" ln -s "$SCRIPT_DIR/viperssh" "$link_path" && [[ -L "$link_path" ]]; then
+        echo -e "${GREEN}>> Symlink created: ${CYAN}$link_path${RESET}"
+        echo -e "${DIM}>> You can now run '${link_name}' from anywhere${RESET}\n"
+        return 0
+    fi
+
+    echo -e "${MAGENTA}>> Failed to create symlink${RESET}"
+    return 1
+}
+
+# Check if directory is in PATH
+in_path() {
+    [[ ":$PATH:" == *":$1:"* ]]
+}
+
+# First-time setup
+first_time_setup() {
+    echo ""
+    echo -e "${GREEN}╦  ╦╦╔═╗╔═╗╦═╗${CYAN}╔═╗╔═╗╦ ╦${RESET}"
+    echo -e "${GREEN}╚╗╔╝║╠═╝║╣ ╠╦╝${CYAN}╚═╗╚═╗╠═╣${RESET}"
+    echo -e "${GREEN} ╚╝ ╩╩  ╚═╝╩╚═${CYAN}╚═╝╚═╝╩ ╩${RESET}"
+    echo -e "${DIM}─────────────────────${RESET}"
+    echo ""
+    echo -e "${CYAN}>> First time setup${RESET}"
+    echo ""
+
+    # Find bin directories that are in PATH
+    local bin_dirs=("$HOME/bin" "$HOME/.local/bin" "/usr/local/bin")
+    local available_dirs=()
+
+    for dir in "${bin_dirs[@]}"; do
+        in_path "$dir" || continue
+        if [[ -d "$dir" ]]; then
+            available_dirs+=("$dir")
+        else
+            available_dirs+=("$dir (will create)")
+        fi
+    done
+
+    if [[ ${#available_dirs[@]} -eq 0 ]]; then
+        echo -e "${MAGENTA}>> No standard bin directories found in PATH${RESET}"
+        echo -e "   Add ~/bin to your PATH and re-run with --setup"
+        echo ""
+        touch "$MARKER_FILE"
+        return
+    fi
+
+    echo -e "   Create symlink to run viperssh from anywhere?"
+    echo ""
+
+    local i=1
+    for dir in "${available_dirs[@]}"; do
+        echo -e "   ${GREEN}[$i]${RESET} $dir"
+        ((i++))
+    done
+    echo -e "   ${DIM}[s] Skip${RESET}"
+    echo ""
+
+    read -p "   >> Select directory: " choice
+
+    if [[ "$choice" == "s" ]] || [[ "$choice" == "S" ]]; then
+        echo -e "\n${DIM}>> Skipped. Run with --setup to configure later.${RESET}\n"
+        touch "$MARKER_FILE"
+        return
+    fi
+
+    if [[ "$choice" =~ ^[0-9]+$ ]] && [[ "$choice" -ge 1 ]] && [[ "$choice" -le ${#available_dirs[@]} ]]; then
+        local selected="${available_dirs[$((choice-1))]}"
+        # Remove "(will create)" suffix if present
+        selected="${selected% (will create)}"
+
+        # Create directory if needed
+        if [[ ! -d "$selected" ]]; then
+            mkdir -p "$selected"
+            echo -e "\n${GREEN}>> Created $selected${RESET}"
+        fi
+
+        echo ""
+
+        # Command name options
+        local cmd_names=("viperssh" "viper" "vp")
+
+        for cmd_name in "${cmd_names[@]}"; do
+            echo -e "   Trying command name: ${CYAN}${cmd_name}${RESET}"
+            if create_symlink "$selected" "$cmd_name"; then
+                touch "$MARKER_FILE"
+                return
+            fi
+        done
+
+        # All default names failed, ask for custom name
+        echo ""
+        read -p "   >> Enter custom command name (or 's' to skip): " custom_name
+        if [[ -n "$custom_name" ]] && [[ "$custom_name" != "s" ]]; then
+            if create_symlink "$selected" "$custom_name"; then
+                touch "$MARKER_FILE"
+                return
+            fi
+        fi
+
+        echo -e "\n${DIM}>> Symlink setup skipped.${RESET}\n"
+    else
+        echo -e "\n${DIM}>> Invalid selection, skipped.${RESET}\n"
+    fi
+
+    touch "$MARKER_FILE"
+}
+
+# Check if venv exists, if not create it
+if [[ ! -d "$VENV_DIR" ]]; then
+    echo -e "${CYAN}>> Creating virtual environment...${RESET}"
+    python3 -m venv "$VENV_DIR"
+    "$VENV_DIR/bin/pip" install -q -r "$SCRIPT_DIR/requirements.txt"
+fi
+
+# First-time setup prompt
+if [[ ! -f "$MARKER_FILE" ]] || [[ "$1" == "--setup" ]]; then
+    first_time_setup
+    # Remove --setup from args if present
+    [[ "$1" == "--setup" ]] && shift
+fi
+
+# Run viperssh with the venv python
+exec "$VENV_DIR/bin/python3" "$SCRIPT_DIR/viper.py" "$@"

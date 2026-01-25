@@ -1,0 +1,18 @@
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.env
+.viperssh_initialized
+.viper_theme
+
+# Dev tools (not needed by end users)
+CLAUDE.md
+CLAUDE_README.md
+todo.md
+deployplan.md
+.claude/
+
+# Personal configuration (contains sensitive hostnames/domains)
+etc/suffixes.conf
+etc/host_list/*.hosts
