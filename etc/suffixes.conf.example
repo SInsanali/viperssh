@@ -1,8 +1,0 @@
-# Environment → FQDN suffix mapping
-# Copy this file to suffixes.conf and edit with your values
-# Format: ENV_NAME=.suffix.domain.tld
-# Leave blank after '=' if no suffix is needed
-
-Dev=.dev.example.local
-Test=.test.example.local
-Prod=.prod.example.local

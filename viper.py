@@ -647,6 +647,10 @@ class ViperApp(App):
         """Return focus to environment list and reset state."""
         self._clear_host_highlights()
         self.selected_env = None
+        search_box = self.query_one("#search-box", Input)
+        search_box.value = ""
+        self.filtered_hosts = self.current_hosts.copy()
+        self._refresh_host_list()
         env_list = self.query_one("#env-list", ListView)
         env_list.index = 0
         if env_list.children:

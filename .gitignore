@@ -14,5 +14,4 @@ deployplan.md
 .claude/
 
 # Personal configuration (contains sensitive hostnames/domains)
-etc/suffixes.conf
-etc/host_list/*.hosts
+etc/hosts.yaml

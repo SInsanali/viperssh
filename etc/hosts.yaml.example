@@ -1,0 +1,35 @@
+# ViperSSH Configuration
+# Copy this file to hosts.yaml and edit with your environments
+#
+# Format:
+#   environments:
+#     Environment_Name:
+#       suffix: .domain.suffix   # appended to short hostnames
+#       hosts:
+#         - hostname1
+#         - hostname2
+
+environments:
+  Dev:
+    suffix: .dev.example.local
+    hosts:
+      - bastion1
+      - appserver1
+      - appserver2
+      - database1
+
+  Test:
+    suffix: .test.example.local
+    hosts:
+      - testserver1
+      - testserver2
+
+  Prod:
+    suffix: .prod.example.local
+    hosts:
+      - prodserver1
+      - prodserver2
+      # FQDNs (with dots) are used as-is:
+      # - special.other.domain.com
+      # user@host format also works:
+      # - admin@jumpbox.example.com
