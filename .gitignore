@@ -15,3 +15,6 @@ deployplan.md
 
 # Personal configuration (contains sensitive hostnames/domains)
 etc/hosts.yaml
+
+# Personal dev files
+.local/
