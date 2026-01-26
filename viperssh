@@ -138,7 +138,9 @@ check_dependencies() {
             echo -e "      ${DIM}Install: ${install_cmd}${RESET}"
         done
         echo ""
+        return 0  # Warnings were shown
     fi
+    return 1  # No warnings
 }
 
 # Run command with sudo if directory is not writable
@@ -314,7 +316,9 @@ done
 
 # Check optional dependencies on first run
 if [[ ! -f "$MARKER_FILE" ]]; then
-    check_dependencies
+    if check_dependencies; then
+        read -p "   Press Enter to continue... "
+    fi
 fi
 
 # Check if venv exists, if not create it
