@@ -14,6 +14,25 @@ cp etc/hosts.yaml.example etc/hosts.yaml
 
 On first run, you'll be prompted to create a symlink so you can run `viperssh` from anywhere.
 
+## Usage
+
+```
+viperssh [OPTIONS]
+
+Options:
+  --setup    Re-run first-time setup (symlink creation)
+  --check    Check system dependencies
+  -h, --help Show help
+```
+
+## Dependencies
+
+**Required:** python3, ssh
+
+**Optional:** expect (enables password caching)
+
+Run `viperssh --check` to verify dependencies are installed.
+
 ## Uninstall
 
 1. Delete the folder
