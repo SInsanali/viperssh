@@ -457,6 +457,7 @@ class ViperApp(App):
         self.current_hosts: list[str] = []
         self.filtered_hosts: list[str] = []
         self._active_theme = self._load_theme()
+        self._saved_env_index: int = 0  # Track env position for search restore
 
     def _load_theme(self) -> str:
         """Load saved theme from config file."""
@@ -646,15 +647,17 @@ class ViperApp(App):
     def _return_to_env_list(self) -> None:
         """Return focus to environment list and reset state."""
         self._clear_host_highlights()
+        env_list = self.query_one("#env-list", ListView)
+        # Use saved position from when search was opened
+        restore_index = self._saved_env_index
         self.selected_env = None
         search_box = self.query_one("#search-box", Input)
         search_box.value = ""
         self.filtered_hosts = self.current_hosts.copy()
         self._refresh_host_list()
-        env_list = self.query_one("#env-list", ListView)
-        env_list.index = 0
-        if env_list.children:
-            env_list.scroll_to_widget(env_list.children[0])
+        env_list.index = restore_index
+        if env_list.children and restore_index < len(env_list.children):
+            env_list.scroll_to_widget(env_list.children[restore_index])
         self._update_status("Select environment  [dim red]↑↓ navigate  Enter select  ? help  q quit[/]")
         self.query_one("#host-panel").border_title = "HOSTS"
         self.call_later(env_list.focus)
@@ -679,14 +682,15 @@ class ViperApp(App):
             self._return_to_env_list()
 
     def action_escape_back(self) -> None:
-        """Context-aware escape: search->hosts, hosts->envs, envs->quit."""
+        """Context-aware escape: search->envs, hosts->envs, envs->quit."""
         search_box = self.query_one("#search-box", Input)
         env_list = self.query_one("#env-list", ListView)
         left_list = self.query_one("#host-list-left", ListView)
         right_list = self.query_one("#host-list-right", ListView)
 
         if search_box.has_focus:
-            self._focus_host_list()
+            search_box.value = ""
+            self._return_to_env_list()
         elif left_list.has_focus or right_list.has_focus:
             self._return_to_env_list()
         elif env_list.has_focus:
@@ -694,6 +698,10 @@ class ViperApp(App):
 
     def action_focus_search(self) -> None:
         """Focus the search box."""
+        # Save current environment position before entering search
+        env_list = self.query_one("#env-list", ListView)
+        if env_list.index is not None:
+            self._saved_env_index = env_list.index
         self.query_one("#search-box", Input).focus()
         self._update_status("Search mode  [dim red]Type to filter  Enter to jump  Esc to exit[/]")
 
