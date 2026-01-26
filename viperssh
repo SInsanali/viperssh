@@ -49,11 +49,11 @@ get_install_command() {
     local package="$2"
 
     case "$pkg_manager" in
-        apt)     echo "sudo apt install $package" ;;
-        dnf)     echo "sudo dnf install $package" ;;
-        yum)     echo "sudo yum install $package" ;;
-        pacman)  echo "sudo pacman -S $package" ;;
-        zypper)  echo "sudo zypper install $package" ;;
+        apt)     echo "sudo apt install -y $package" ;;
+        dnf)     echo "sudo dnf install -y $package" ;;
+        yum)     echo "sudo yum install -y $package" ;;
+        pacman)  echo "sudo pacman -S --noconfirm $package" ;;
+        zypper)  echo "sudo zypper install -y $package" ;;
         apk)     echo "sudo apk add $package" ;;
         brew)    echo "brew install $package" ;;
         *)       echo "# Install '$package' using your package manager" ;;
@@ -126,21 +126,41 @@ check_dependencies() {
         exit 1
     fi
 
-    # Report missing optional dependencies (warning only)
+    # Handle missing optional dependencies - offer to install
     if [[ ${#missing_optional[@]} -gt 0 ]]; then
-        echo -e "\n${YELLOW}WARNING: Missing optional dependencies${RESET}\n"
+        echo -e "\n${YELLOW}Missing recommended packages:${RESET}\n"
+        local install_cmds=()
         for dep in "${missing_optional[@]}"; do
             local pkg_name
             pkg_name=$(get_package_name "$pkg_manager" "$dep")
             local install_cmd
             install_cmd=$(get_install_command "$pkg_manager" "$pkg_name")
-            echo -e "  ${YELLOW}[!]${RESET} ${dep} - optional (password automation disabled)"
-            echo -e "      ${DIM}Install: ${install_cmd}${RESET}"
+            echo -e "  ${YELLOW}•${RESET} ${dep} ${DIM}(enables password caching)${RESET}"
+            install_cmds+=("$install_cmd")
         done
         echo ""
-        return 0  # Warnings were shown
+        read -p "   Install now? [Y/n]: " response
+        if [[ "$response" != "n" && "$response" != "N" ]]; then
+            for cmd in "${install_cmds[@]}"; do
+                echo -e "\n${CYAN}>> Running: ${cmd}${RESET}\n"
+                eval "$cmd"
+            done
+            # Verify installation
+            local still_missing=0
+            for dep in "${missing_optional[@]}"; do
+                if ! command -v "$dep" &>/dev/null; then
+                    still_missing=1
+                fi
+            done
+            if [[ $still_missing -eq 0 ]]; then
+                echo -e "\n${GREEN}>> All packages installed successfully!${RESET}\n"
+            else
+                echo -e "\n${YELLOW}>> Some packages may not have installed correctly${RESET}\n"
+            fi
+        fi
+        return 0  # Interaction occurred
     fi
-    return 1  # No warnings
+    return 1  # No missing deps
 }
 
 # Run command with sudo if directory is not writable
@@ -316,9 +336,7 @@ done
 
 # Check optional dependencies on first run
 if [[ ! -f "$MARKER_FILE" ]]; then
-    if check_dependencies; then
-        read -p "   Press Enter to continue... "
-    fi
+    check_dependencies
 fi
 
 # Check if venv exists, if not create it
