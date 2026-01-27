@@ -1,9 +1,18 @@
 """Configuration loading for ViperSSH."""
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
 import yaml
+
+
+@dataclass
+class HostInfo:
+    """Represents a host with display name and connection target."""
+
+    display_name: str
+    target: str
 
 
 class Config:
@@ -50,11 +59,25 @@ class Config:
 
     def get_suffix(self, environment: str) -> str:
         """Get the FQDN suffix for an environment."""
-        return self._data.get(environment, {}).get("suffix", "")
+        suffix = self._data.get(environment, {}).get("suffix")
+        return suffix if suffix else ""
 
-    def get_hosts(self, environment: str) -> list[str]:
-        """Get list of hosts for an environment."""
-        return self._data.get(environment, {}).get("hosts", []).copy()
+    def get_hosts(self, environment: str) -> list[HostInfo]:
+        """Get list of hosts for an environment.
+
+        Supports two formats:
+        - String: "hostname" -> HostInfo("hostname", "hostname")
+        - Dict: {alias: target} -> HostInfo(alias, target)
+        """
+        raw_hosts = self._data.get(environment, {}).get("hosts", [])
+        result = []
+        for h in raw_hosts:
+            if isinstance(h, str):
+                result.append(HostInfo(h, h))
+            elif isinstance(h, dict) and len(h) == 1:
+                alias, target = next(iter(h.items()))
+                result.append(HostInfo(alias, target))
+        return result
 
     def build_target(self, environment: str, hostname: str) -> str:
         """Build the full connection target for a host.

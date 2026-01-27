@@ -49,6 +49,9 @@ proc read_password {} {
     return $password
 }
 
+# Track if we successfully reached a shell
+set reached_shell 0
+
 # Suppress banner/MOTD output
 log_user 0
 
@@ -74,12 +77,19 @@ expect {
     }
 
     eof {
-        puts "\nSession ended."
+        # Show any buffered output if we never reached the shell
+        if {!$reached_shell && [info exists expect_out(buffer)]} {
+            set output [string trim $expect_out(buffer)]
+            if {$output ne ""} {
+                puts $output
+            }
+        }
         exit 0
     }
 
     # Shell prompt detection - re-enable output and hand off
     -re {[$#%>] $} {
+        set reached_shell 1
         log_user 1
         send "\r"
     }

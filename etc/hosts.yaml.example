@@ -6,8 +6,9 @@
 #     Environment_Name:
 #       suffix: .domain.suffix   # appended to short hostnames
 #       hosts:
-#         - hostname1
+#         - hostname1            # simple string format
 #         - hostname2
+#         - alias: actual.hostname.com   # alias format for long hostnames
 
 environments:
   Dev:
@@ -33,3 +34,5 @@ environments:
       # - special.other.domain.com
       # user@host format also works:
       # - admin@jumpbox.example.com
+      # Alias format for long hostnames (displays "prod-bastion", connects to the ELB):
+      # - prod-bastion: PROD-BASTION-EXT-NLB-abc123.elb.us-east-1.amazonaws.com

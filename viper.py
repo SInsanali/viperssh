@@ -14,7 +14,7 @@ from textual.containers import Container, Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Footer, Input, Label, ListItem, ListView, Static
 
-from config import Config
+from config import Config, HostInfo
 
 # Theme definitions
 THEMES = {
@@ -268,7 +268,7 @@ class ThemeScreen(ModalScreen):
             item = ThemeListItem(theme_id, theme["name"], is_active)
             theme_list.append(item)
         theme_list.focus()
-        theme_list.index = 0
+        self.call_later(lambda: setattr(theme_list, "index", 0))
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         """Handle theme selection."""
@@ -303,12 +303,13 @@ class ThemeCommands(Provider):
 class HostListItem(ListItem):
     """A list item representing a host."""
 
-    def __init__(self, hostname: str, *args, **kwargs) -> None:
+    def __init__(self, host_info: HostInfo, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        self.hostname = hostname
+        self.display_name = host_info.display_name
+        self.target = host_info.target
 
     def compose(self) -> ComposeResult:
-        yield Label(f"  {self.hostname}", classes="item-label")
+        yield Label(f"  {self.display_name}", classes="item-label")
 
     def watch_highlighted(self, highlighted: bool) -> None:
         try:
@@ -316,9 +317,9 @@ class HostListItem(ListItem):
         except Exception:
             return
         if highlighted:
-            label.update(f"[bold red]> {self.hostname}[/]")
+            label.update(f"[bold red]> {self.display_name}[/]")
         else:
-            label.update(f"  {self.hostname}")
+            label.update(f"  {self.display_name}")
 
 
 class EnvListItem(ListItem):
@@ -519,8 +520,8 @@ class ViperApp(App):
         super().__init__()
         self.config = Config(config_dir)
         self.selected_env: Optional[str] = None
-        self.current_hosts: list[str] = []
-        self.filtered_hosts: list[str] = []
+        self.current_hosts: list[HostInfo] = []
+        self.filtered_hosts: list[HostInfo] = []
         self._active_theme = self._load_theme()
         self._saved_env_index: int = 0  # Track env position for search restore
 
@@ -638,10 +639,10 @@ class ViperApp(App):
         left_hosts = self.filtered_hosts[:mid]
         right_hosts = self.filtered_hosts[mid:]
 
-        for host in left_hosts:
-            left_list.append(HostListItem(host))
-        for host in right_hosts:
-            right_list.append(HostListItem(host))
+        for host_info in left_hosts:
+            left_list.append(HostListItem(host_info))
+        for host_info in right_hosts:
+            right_list.append(HostListItem(host_info))
 
     def _update_status(self, message: str) -> None:
         """Update the status bar."""
@@ -676,7 +677,7 @@ class ViperApp(App):
         if isinstance(event.item, HostListItem):
             env = self._get_current_env()
             if env:
-                target = self.config.build_target(env, event.item.hostname)
+                target = self.config.build_target(env, event.item.target)
                 self._update_status(f"Initiating connection: {target}")
                 self._connect(target)
 
@@ -685,7 +686,7 @@ class ViperApp(App):
         """Filter hosts based on search input."""
         query = event.value.lower()
         if query:
-            self.filtered_hosts = [h for h in self.current_hosts if query in h.lower()]
+            self.filtered_hosts = [h for h in self.current_hosts if query in h.display_name.lower()]
         else:
             self.filtered_hosts = self.current_hosts.copy()
         self._refresh_host_list()
@@ -815,7 +816,7 @@ class ViperApp(App):
                 if isinstance(item, HostListItem):
                     try:
                         label = item.query_one(".item-label")
-                        label.update(f"  {item.hostname}")
+                        label.update(f"  {item.display_name}")
                     except Exception:
                         pass
 
@@ -854,11 +855,11 @@ class ViperApp(App):
             self._focus_right_list(current_row)
 
     def _get_selected_host(self, list_view: ListView) -> Optional[str]:
-        """Get the hostname of the selected item in a list view."""
+        """Get the target of the selected item in a list view."""
         if list_view.index is not None and list_view.index < len(list_view.children):
             item = list_view.children[list_view.index]
             if isinstance(item, HostListItem):
-                return item.hostname
+                return item.target
         return None
 
     def _get_current_env(self) -> Optional[str]:
