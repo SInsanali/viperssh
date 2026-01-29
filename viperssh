@@ -79,6 +79,14 @@ get_package_name() {
                 *)      echo "openssh-clients" ;;
             esac
             ;;
+        python3-venv)
+            case "$pkg_manager" in
+                apt)    echo "python3-venv" ;;
+                pacman) echo "python" ;;  # included in python package
+                dnf|yum) echo "python3" ;;  # included in python3 package
+                *)      echo "python3-venv" ;;
+            esac
+            ;;
         *)
             echo "$generic_name"
             ;;
@@ -103,6 +111,11 @@ check_dependencies() {
             missing_required+=("$dep")
         fi
     done
+
+    # Check if python3 venv module is available
+    if command -v python3 &>/dev/null && ! python3 -m venv --help &>/dev/null; then
+        missing_required+=("python3-venv")
+    fi
 
     # Check optional dependencies
     for dep in "${optional_deps[@]}"; do
@@ -349,7 +362,12 @@ if [[ ! -d "$VENV_DIR" ]] || ! "$VENV_DIR/bin/python3" -c "import textual" 2>/de
         echo -e "${CYAN}>> Reinstalling dependencies...${RESET}"
     else
         echo -e "${CYAN}>> Creating virtual environment...${RESET}"
-        python3 -m venv "$VENV_DIR"
+        if ! python3 -m venv "$VENV_DIR" || [[ ! -x "$VENV_DIR/bin/pip" ]]; then
+            echo -e "${RED}>> Failed to create virtual environment${RESET}"
+            echo -e "${DIM}   On Debian/Ubuntu, install: sudo apt install python3-venv${RESET}"
+            rm -rf "$VENV_DIR"
+            exit 1
+        fi
     fi
     echo -e "${CYAN}>> Installing dependencies...${RESET}"
     if ! "$VENV_DIR/bin/pip" install -r "$SCRIPT_DIR/requirements.txt"; then
