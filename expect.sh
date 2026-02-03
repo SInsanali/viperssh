@@ -58,6 +58,14 @@ log_user 0
 # ==== START SSH SESSION ====
 spawn ssh $dest
 
+# Handle window resize - propagate to spawned process
+trap {
+    set size [exec stty size < /dev/tty]
+    set rows [lindex $size 0]
+    set cols [lindex $size 1]
+    stty rows $rows columns $cols < $spawn_out(slave,name)
+} WINCH
+
 # ==== HANDLE PROMPTS ====
 expect {
     -re "(yes/no|fingerprint)" {
