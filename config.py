@@ -108,10 +108,10 @@ class History:
         except (OSError, json.JSONDecodeError):
             return []
 
-    def add(self, target: str) -> None:
+    def add(self, target: str, proto: str = "ssh") -> None:
         """Add target to history, deduplicating and trimming to MAX_HISTORY."""
         entries = [e for e in self.load() if e.get("target") != target]
-        entries.insert(0, {"target": target, "ts": time.time()})
+        entries.insert(0, {"target": target, "ts": time.time(), "proto": proto})
         entries = entries[:MAX_HISTORY]
         try:
             HISTORY_FILE.write_text(json.dumps(entries))

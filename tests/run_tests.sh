@@ -148,7 +148,26 @@ send "q"
 expect eof
 '
 
-# Test 7: History modal opens and closes with r key
+# Test 7: History proto field stored correctly
+run_test "History sftp proto stored" python3 -c "
+import tempfile
+from pathlib import Path
+import config as cfg
+with tempfile.NamedTemporaryFile(suffix='.json', delete=False) as f:
+    path = Path(f.name)
+cfg.HISTORY_FILE = path
+try:
+    h = cfg.History()
+    h.add('host1.dev.local', proto='sftp')
+    h.add('host2.dev.local', proto='ssh')
+    entries = h.load()
+    assert entries[0]['proto'] == 'ssh'
+    assert entries[1]['proto'] == 'sftp'
+finally:
+    path.unlink(missing_ok=True)
+"
+
+# Test 9: History modal opens and closes with r key
 run_test "History modal open/close" expect -c '
 set timeout 5
 spawn ./viperssh

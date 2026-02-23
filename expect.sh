@@ -3,11 +3,15 @@
 # ==== CONFIGURATION ====
 set timeout -1
 
-# Destination is first argument
+# Destination is first argument, protocol is optional second (default: ssh)
 set dest [lindex $argv 0]
+set proto [lindex $argv 1]
+if {$proto eq ""} {
+    set proto "ssh"
+}
 
 if {$dest eq ""} {
-    puts "Usage: $argv0 host"
+    puts "Usage: $argv0 host \[ssh|sftp\]"
     exit 1
 }
 
@@ -55,8 +59,8 @@ set reached_shell 0
 # Suppress banner/MOTD output
 log_user 0
 
-# ==== START SSH SESSION ====
-spawn ssh $dest
+# ==== START SESSION ====
+spawn $proto $dest
 
 # Handle window resize - propagate to spawned process
 trap {

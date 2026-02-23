@@ -5,7 +5,12 @@ import argparse
 import os
 import time
 from pathlib import Path
-from typing import Optional
+from typing import NamedTuple, Optional
+
+
+class ConnectionRequest(NamedTuple):
+    target: str
+    proto: str = "ssh"
 
 from textual import on
 from textual.app import App, ComposeResult
@@ -316,25 +321,28 @@ def _relative_time(ts: float) -> str:
 class HistoryListItem(ListItem):
     """A list item representing a history entry."""
 
-    def __init__(self, target: str, ts: float, *args, **kwargs) -> None:
+    def __init__(self, target: str, ts: float, proto: str = "ssh", *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.target = target
         self.ts = ts
+        self.proto = proto
+
+    def _label_text(self, highlighted: bool = False) -> str:
+        rel = _relative_time(self.ts)
+        tag = " [dim cyan]\\[sftp][/]" if self.proto == "sftp" else ""
+        if highlighted:
+            return f"[bold red]> {self.target}[/]{tag}  [dim]{rel}[/]"
+        return f"  {self.target}{tag}  [dim]{rel}[/]"
 
     def compose(self) -> ComposeResult:
-        rel = _relative_time(self.ts)
-        yield Label(f"  {self.target}  [dim]{rel}[/]", classes="history-label")
+        yield Label(self._label_text(), classes="history-label")
 
     def watch_highlighted(self, highlighted: bool) -> None:
         try:
             label = self.query_one(".history-label")
         except Exception:
             return
-        rel = _relative_time(self.ts)
-        if highlighted:
-            label.update(f"[bold red]> {self.target}[/]  [dim]{rel}[/]")
-        else:
-            label.update(f"  {self.target}  [dim]{rel}[/]")
+        label.update(self._label_text(highlighted))
 
 
 class HistoryScreen(ModalScreen):
@@ -405,7 +413,7 @@ class HistoryScreen(ModalScreen):
         else:
             empty_label.update("")
             for entry in history:
-                history_list.append(HistoryListItem(entry["target"], entry["ts"]))
+                history_list.append(HistoryListItem(entry["target"], entry["ts"], entry.get("proto", "ssh")))
             history_list.focus()
             self.call_later(lambda: setattr(history_list, "index", 0))
 
@@ -629,6 +637,7 @@ class ViperApp(App):
         Binding("h", "help", "Help", show=False),
         Binding("t", "open_themes", "Themes"),
         Binding("r", "open_history", "Recent"),
+        Binding("s", "sftp", "SFTP", show=False),
         Binding("q", "quit", "Quit"),
         Binding("tab", "switch_panel", "Switch", show=False),
         Binding("j", "cursor_down", "Down", show=False),
@@ -852,7 +861,7 @@ class ViperApp(App):
     def _show_host_nav_status(self) -> None:
         """Show status bar for host navigation."""
         env = self._get_current_env() or "?"
-        self._update_status(f"[bold]{env}[/]  [dim red]↑↓ navigate  Enter connect  / search  Esc back[/]")
+        self._update_status(f"[bold]{env}[/]  [dim red]↑↓ navigate  Enter ssh  s sftp  / search  Esc back[/]")
 
     def action_back(self) -> None:
         """Go back - right column to left, left column to environments."""
@@ -909,6 +918,18 @@ class ViperApp(App):
             if target:
                 self._connect(target)
         self.push_screen(HistoryScreen(), handle_history)
+
+    def action_sftp(self) -> None:
+        """Connect to the selected host via SFTP."""
+        left_list = self.query_one("#host-list-left", ListView)
+        right_list = self.query_one("#host-list-right", ListView)
+        if left_list.has_focus or right_list.has_focus:
+            focused = left_list if left_list.has_focus else right_list
+            hostname = self._get_selected_host(focused)
+            env = self._get_current_env()
+            if hostname and env:
+                target = self.config.build_target(env, hostname)
+                self._connect(target, proto="sftp")
 
     def action_switch_panel(self) -> None:
         """Switch focus between environment and host panels."""
@@ -1040,10 +1061,10 @@ class ViperApp(App):
             target = self.config.build_target(env, hostname)
             self._connect(target)
 
-    def _connect(self, target: str) -> None:
-        """Connect to the specified target via SSH."""
-        History().add(target)
-        self.exit(result=target)
+    def _connect(self, target: str, proto: str = "ssh") -> None:
+        """Connect to the specified target via SSH or SFTP."""
+        History().add(target, proto=proto)
+        self.exit(result=ConnectionRequest(target=target, proto=proto))
 
 
 def main() -> None:
@@ -1062,15 +1083,29 @@ def main() -> None:
     if not result:
         return
 
+    if isinstance(result, ConnectionRequest):
+        target, proto = result.target, result.proto
+    else:
+        target, proto = result, "ssh"
+
     script_dir = Path(__file__).parent.resolve()
     expect_script = script_dir / "expect.sh"
 
-    print(f"\n\033[1;32m[VIPERSSH]\033[0m Connecting to \033[1;36m{result}\033[0m\n")
+    mode_label = " via \033[1;33mSFTP\033[0m" if proto == "sftp" else ""
+    print(f"\n\033[1;32m[VIPERSSH]\033[0m Connecting to \033[1;36m{target}\033[0m{mode_label}\n")
 
     if expect_script.exists():
-        os.execvp(str(expect_script), [str(expect_script), result])
+        os.execvp(str(expect_script), [str(expect_script), target, proto])
+    elif proto == "sftp":
+        import signal
+        import subprocess
+        import sys
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+        ret = subprocess.call(["sftp", target])
+        subprocess.call(["stty", "sane"], stderr=subprocess.DEVNULL)
+        sys.exit(ret)
     else:
-        os.execvp("ssh", ["ssh", result])
+        os.execvp("ssh", ["ssh", target])
 
 
 if __name__ == "__main__":
