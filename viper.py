@@ -15,7 +15,6 @@ class ConnectionRequest(NamedTuple):
 from textual import on
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.command import Hit, Hits, Provider
 from textual.containers import Container, Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Footer, Input, Label, ListItem, ListView, Static
@@ -288,23 +287,6 @@ class ThemeScreen(ModalScreen):
         self.query_one("#theme-list", ListView).action_cursor_up()
 
 
-class ThemeCommands(Provider):
-    """Command provider for theme switching."""
-
-    async def search(self, query: str) -> Hits:
-        """Search for theme commands."""
-        matcher = self.matcher(query)
-        for theme_id, theme in THEMES.items():
-            command = f"Theme: {theme['name']}"
-            score = matcher.match(command)
-            if score > 0:
-                yield Hit(
-                    score=score,
-                    match_display=matcher.highlight(command),
-                    command=lambda t=theme_id: self.app.action_set_theme(t),
-                    help=f"Switch to {theme['name']} theme",
-                )
-
 
 def _relative_time(ts: float) -> str:
     """Return a human-friendly relative time string."""
@@ -329,10 +311,9 @@ class HistoryListItem(ListItem):
 
     def _label_text(self, highlighted: bool = False) -> str:
         rel = _relative_time(self.ts)
-        tag = " [dim cyan]\\[sftp][/]" if self.proto == "sftp" else ""
         if highlighted:
-            return f"[bold red]> {self.target}[/]{tag}  [dim]{rel}[/]"
-        return f"  {self.target}{tag}  [dim]{rel}[/]"
+            return f"[bold red]> {self.target}[/]  [dim yellow]{rel}[/]"
+        return f"  {self.target}  [dim yellow]{rel}[/]"
 
     def compose(self) -> ComposeResult:
         yield Label(self._label_text(), classes="history-label")
@@ -343,6 +324,23 @@ class HistoryListItem(ListItem):
         except Exception:
             return
         label.update(self._label_text(highlighted))
+
+
+class HistorySectionItem(ListItem):
+    """A non-interactive section header in the history list."""
+
+    def __init__(self, title: str, color: str, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.title = title
+        self.color = color
+        self.disabled = True
+
+    def compose(self) -> ComposeResult:
+        line = "─" * 44
+        yield Label(f"[bold {self.color}]{self.title}[/] [dim]{line}[/]", classes="section-label")
+
+    def watch_highlighted(self, highlighted: bool) -> None:
+        pass
 
 
 class HistoryScreen(ModalScreen):
@@ -363,7 +361,7 @@ class HistoryScreen(ModalScreen):
     }
 
     #history-container {
-        width: 60;
+        width: 62;
         height: auto;
         background: #0d0d0d;
         border: heavy #ff00ff;
@@ -379,7 +377,7 @@ class HistoryScreen(ModalScreen):
 
     #history-list {
         height: auto;
-        max-height: 12;
+        max-height: 20;
     }
 
     #history-list > ListItem {
@@ -408,18 +406,33 @@ class HistoryScreen(ModalScreen):
         history_list = self.query_one("#history-list", ListView)
         empty_label = self.query_one("#history-empty", Static)
 
+        ssh_entries = [e for e in history if e.get("proto", "ssh") == "ssh"]
+        sftp_entries = [e for e in history if e.get("proto") == "sftp"]
+
         if not history:
             empty_label.update("[dim]No history yet[/]")
-        else:
-            empty_label.update("")
-            for entry in history:
-                history_list.append(HistoryListItem(entry["target"], entry["ts"], entry.get("proto", "ssh")))
-            history_list.focus()
-            self.call_later(lambda: setattr(history_list, "index", 0))
+            return
+
+        empty_label.update("")
+
+        if ssh_entries:
+            history_list.append(HistorySectionItem("SSH", "#00ff00"))
+            for entry in ssh_entries:
+                history_list.append(HistoryListItem(entry["target"], entry["ts"], "ssh"))
+
+        if sftp_entries:
+            history_list.append(HistorySectionItem("SFTP", "#00bfff"))
+            for entry in sftp_entries:
+                history_list.append(HistoryListItem(entry["target"], entry["ts"], "sftp"))
+
+        history_list.focus()
+        # Focus first selectable item (skip section header at index 0)
+        first = 1 if ssh_entries else 1
+        self.call_later(lambda: setattr(history_list, "index", first))
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         if isinstance(event.item, HistoryListItem):
-            self.dismiss(event.item.target)
+            self.dismiss(ConnectionRequest(event.item.target, event.item.proto))
 
     def action_cursor_down(self) -> None:
         self.query_one("#history-list", ListView).action_cursor_down()
@@ -476,7 +489,7 @@ class EnvListItem(ListItem):
 class ViperApp(App):
     """Main Viper TUI application."""
 
-    COMMANDS = {ThemeCommands}
+    COMMANDS = set()
 
     CSS = """
     Screen {
@@ -914,9 +927,9 @@ class ViperApp(App):
 
     def action_open_history(self) -> None:
         """Open recent connections screen."""
-        def handle_history(target: Optional[str]) -> None:
-            if target:
-                self._connect(target)
+        def handle_history(req: Optional[ConnectionRequest]) -> None:
+            if req:
+                self._connect(req.target, proto=req.proto)
         self.push_screen(HistoryScreen(), handle_history)
 
     def action_sftp(self) -> None:
