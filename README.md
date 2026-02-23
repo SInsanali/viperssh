@@ -1,6 +1,6 @@
 # ViperSSH
 
-TUI SSH connection manager with password caching and keepalive.
+TUI SSH/SFTP connection manager with password caching, connection history, and keepalive.
 
 ## Install
 
@@ -27,9 +27,9 @@ Options:
 
 ## Dependencies
 
-**Required:** python3, ssh
+**Required:** python3, ssh, sftp
 
-**Optional:** expect (enables password caching)
+**Optional:** expect (enables password caching for SSH and SFTP)
 
 Run `viperssh --check` to verify dependencies are installed.
 
@@ -57,4 +57,20 @@ environments:
 
 ## Keys
 
-`?` help | `/` search | `Enter` connect | `Esc` back | `q` quit | `t` themes
+| Key | Action |
+|-----|--------|
+| `↑↓` / `j k` | Navigate |
+| `Enter` | Connect via SSH |
+| `s` | Connect via SFTP |
+| `r` | Recent connections |
+| `/` | Search hosts |
+| `t` | Theme selector |
+| `?` | Help |
+| `Esc` | Back |
+| `q` | Quit |
+
+## Connection History
+
+Press `r` to open a recent connections modal showing your last 10 connections, split into SSH and SFTP sections. Select any entry to reconnect using the original protocol.
+
+History is stored locally in `.viper_history` and is not committed to version control.
