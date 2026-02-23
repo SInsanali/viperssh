@@ -73,6 +73,20 @@ expect {
         exp_continue
     }
 
+    -re {[Nn]ew [Pp]assword} {
+        # Forced password change - clear cached password and hand off to user
+        set cached_password ""
+        log_user 1
+        puts "\n\[VIPERSSH\] Password change required. Complete it manually.\n"
+        send_user $expect_out(0,string)
+        interact {
+            -timeout 180 {
+                send " \b"
+            }
+        }
+        exit 0
+    }
+
     -re "\[Pp\]assword:" {
         if {$cached_password eq ""} {
             # First password prompt - ask user and cache it
