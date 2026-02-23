@@ -3,6 +3,7 @@
 
 import argparse
 import os
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -14,7 +15,7 @@ from textual.containers import Container, Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Footer, Input, Label, ListItem, ListView, Static
 
-from config import Config, HostInfo
+from config import Config, History, HostInfo
 
 # Theme definitions
 THEMES = {
@@ -300,6 +301,125 @@ class ThemeCommands(Provider):
                 )
 
 
+def _relative_time(ts: float) -> str:
+    """Return a human-friendly relative time string."""
+    delta = int(time.time() - ts)
+    if delta < 60:
+        return "just now"
+    if delta < 3600:
+        return f"{delta // 60}m ago"
+    if delta < 86400:
+        return f"{delta // 3600}h ago"
+    return f"{delta // 86400}d ago"
+
+
+class HistoryListItem(ListItem):
+    """A list item representing a history entry."""
+
+    def __init__(self, target: str, ts: float, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.target = target
+        self.ts = ts
+
+    def compose(self) -> ComposeResult:
+        rel = _relative_time(self.ts)
+        yield Label(f"  {self.target}  [dim]{rel}[/]", classes="history-label")
+
+    def watch_highlighted(self, highlighted: bool) -> None:
+        try:
+            label = self.query_one(".history-label")
+        except Exception:
+            return
+        rel = _relative_time(self.ts)
+        if highlighted:
+            label.update(f"[bold red]> {self.target}[/]  [dim]{rel}[/]")
+        else:
+            label.update(f"  {self.target}  [dim]{rel}[/]")
+
+
+class HistoryScreen(ModalScreen):
+    """Modal recent connections screen."""
+
+    BINDINGS = [
+        Binding("escape", "dismiss", "Close"),
+        Binding("r", "dismiss", "Close"),
+        Binding("q", "dismiss", "Close"),
+        Binding("j", "cursor_down", "Down", show=False),
+        Binding("k", "cursor_up", "Up", show=False),
+    ]
+
+    CSS = """
+    HistoryScreen {
+        align: center middle;
+        background: rgba(0, 0, 0, 0.85);
+    }
+
+    #history-container {
+        width: 60;
+        height: auto;
+        background: #0d0d0d;
+        border: heavy #ff00ff;
+        padding: 1 2;
+    }
+
+    #history-title {
+        text-align: center;
+        text-style: bold;
+        color: #ff00ff;
+        padding-bottom: 1;
+    }
+
+    #history-list {
+        height: auto;
+        max-height: 12;
+    }
+
+    #history-list > ListItem {
+        padding: 0 1;
+    }
+
+    #history-list > ListItem.--highlight {
+        background: #330033;
+    }
+
+    #history-empty {
+        text-align: center;
+        color: #444444;
+        padding: 1 0;
+    }
+    """
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="history-container"):
+            yield Static("[bold #ff00ff]RECENT CONNECTIONS[/]", id="history-title")
+            yield ListView(id="history-list")
+            yield Static("", id="history-empty")
+
+    def on_mount(self) -> None:
+        history = History().load()
+        history_list = self.query_one("#history-list", ListView)
+        empty_label = self.query_one("#history-empty", Static)
+
+        if not history:
+            empty_label.update("[dim]No history yet[/]")
+        else:
+            empty_label.update("")
+            for entry in history:
+                history_list.append(HistoryListItem(entry["target"], entry["ts"]))
+            history_list.focus()
+            self.call_later(lambda: setattr(history_list, "index", 0))
+
+    def on_list_view_selected(self, event: ListView.Selected) -> None:
+        if isinstance(event.item, HistoryListItem):
+            self.dismiss(event.item.target)
+
+    def action_cursor_down(self) -> None:
+        self.query_one("#history-list", ListView).action_cursor_down()
+
+    def action_cursor_up(self) -> None:
+        self.query_one("#history-list", ListView).action_cursor_up()
+
+
 class HostListItem(ListItem):
     """A list item representing a host."""
 
@@ -508,6 +628,7 @@ class ViperApp(App):
         Binding("?", "help", "Help"),
         Binding("h", "help", "Help", show=False),
         Binding("t", "open_themes", "Themes"),
+        Binding("r", "open_history", "Recent"),
         Binding("q", "quit", "Quit"),
         Binding("tab", "switch_panel", "Switch", show=False),
         Binding("j", "cursor_down", "Down", show=False),
@@ -782,6 +903,13 @@ class ViperApp(App):
                 self.action_set_theme(theme_id)
         self.push_screen(ThemeScreen(), handle_theme)
 
+    def action_open_history(self) -> None:
+        """Open recent connections screen."""
+        def handle_history(target: Optional[str]) -> None:
+            if target:
+                self._connect(target)
+        self.push_screen(HistoryScreen(), handle_history)
+
     def action_switch_panel(self) -> None:
         """Switch focus between environment and host panels."""
         env_list = self.query_one("#env-list", ListView)
@@ -914,6 +1042,7 @@ class ViperApp(App):
 
     def _connect(self, target: str) -> None:
         """Connect to the specified target via SSH."""
+        History().add(target)
         self.exit(result=target)
 
 

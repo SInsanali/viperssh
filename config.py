@@ -1,5 +1,7 @@
 """Configuration loading for ViperSSH."""
 
+import json
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -88,3 +90,30 @@ class Config:
         if "." in hostname or "@" in hostname:
             return hostname
         return f"{hostname}{self.get_suffix(environment)}"
+
+
+HISTORY_FILE = Path(__file__).parent / ".viper_history"
+MAX_HISTORY = 10
+
+
+class History:
+    """Manages connection history stored in a local JSON file."""
+
+    def load(self) -> list[dict]:
+        """Return list of {target, ts} dicts, newest first."""
+        if not HISTORY_FILE.exists():
+            return []
+        try:
+            return json.loads(HISTORY_FILE.read_text())
+        except (OSError, json.JSONDecodeError):
+            return []
+
+    def add(self, target: str) -> None:
+        """Add target to history, deduplicating and trimming to MAX_HISTORY."""
+        entries = [e for e in self.load() if e.get("target") != target]
+        entries.insert(0, {"target": target, "ts": time.time()})
+        entries = entries[:MAX_HISTORY]
+        try:
+            HISTORY_FILE.write_text(json.dumps(entries))
+        except OSError:
+            pass

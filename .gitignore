@@ -5,6 +5,7 @@ __pycache__/
 .env
 .viperssh_initialized
 .viper_theme
+.viper_history
 
 # Dev tools (not needed by end users)
 CLAUDE.md
