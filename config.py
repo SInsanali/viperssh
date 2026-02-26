@@ -110,7 +110,10 @@ class History:
 
     def add(self, target: str, proto: str = "ssh") -> None:
         """Add target to history, deduplicating and trimming to MAX_HISTORY."""
-        entries = [e for e in self.load() if e.get("target") != target]
+        entries = [
+            e for e in self.load()
+            if not (e.get("target") == target and e.get("proto", "ssh") == proto)
+        ]
         entries.insert(0, {"target": target, "ts": time.time(), "proto": proto})
         entries = entries[:MAX_HISTORY]
         try:

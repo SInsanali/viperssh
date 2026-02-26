@@ -3,14 +3,12 @@
 
 import argparse
 import os
+import signal
+import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import NamedTuple, Optional
-
-
-class ConnectionRequest(NamedTuple):
-    target: str
-    proto: str = "ssh"
 
 from textual import on
 from textual.app import App, ComposeResult
@@ -20,6 +18,14 @@ from textual.screen import ModalScreen
 from textual.widgets import Footer, Input, Label, ListItem, ListView, Static
 
 from config import Config, History, HostInfo
+
+
+class ConnectionRequest(NamedTuple):
+    """Result returned when the user selects a host to connect to."""
+
+    target: str
+    proto: str = "ssh"
+
 
 # Theme definitions
 THEMES = {
@@ -287,7 +293,6 @@ class ThemeScreen(ModalScreen):
         self.query_one("#theme-list", ListView).action_cursor_up()
 
 
-
 def _relative_time(ts: float) -> str:
     """Return a human-friendly relative time string."""
     delta = int(time.time() - ts)
@@ -406,14 +411,12 @@ class HistoryScreen(ModalScreen):
         history_list = self.query_one("#history-list", ListView)
         empty_label = self.query_one("#history-empty", Static)
 
-        ssh_entries = [e for e in history if e.get("proto", "ssh") == "ssh"]
-        sftp_entries = [e for e in history if e.get("proto") == "sftp"]
-
         if not history:
             empty_label.update("[dim]No history yet[/]")
             return
 
-        empty_label.update("")
+        ssh_entries = [e for e in history if e.get("proto", "ssh") == "ssh"]
+        sftp_entries = [e for e in history if e.get("proto") == "sftp"]
 
         if ssh_entries:
             history_list.append(HistorySectionItem("SSH", "#00ff00"))
@@ -426,9 +429,8 @@ class HistoryScreen(ModalScreen):
                 history_list.append(HistoryListItem(entry["target"], entry["ts"], "sftp"))
 
         history_list.focus()
-        # Focus first selectable item (skip section header at index 0)
-        first = 1 if ssh_entries else 1
-        self.call_later(lambda: setattr(history_list, "index", first))
+        # Skip the section header at index 0 to focus the first selectable item
+        self.call_later(lambda: setattr(history_list, "index", 1))
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         if isinstance(event.item, HistoryListItem):
@@ -1096,10 +1098,8 @@ def main() -> None:
     if not result:
         return
 
-    if isinstance(result, ConnectionRequest):
-        target, proto = result.target, result.proto
-    else:
-        target, proto = result, "ssh"
+    target = result.target
+    proto = result.proto
 
     script_dir = Path(__file__).parent.resolve()
     expect_script = script_dir / "expect.sh"
@@ -1110,9 +1110,6 @@ def main() -> None:
     if expect_script.exists():
         os.execvp(str(expect_script), [str(expect_script), target, proto])
     elif proto == "sftp":
-        import signal
-        import subprocess
-        import sys
         signal.signal(signal.SIGINT, signal.SIG_IGN)
         ret = subprocess.call(["sftp", target])
         subprocess.call(["stty", "sane"], stderr=subprocess.DEVNULL)
