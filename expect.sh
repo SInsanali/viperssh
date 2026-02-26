@@ -60,7 +60,9 @@ set reached_shell 0
 log_user 0
 
 # ==== START SESSION ====
-spawn $proto $dest
+# Skip key-based auth to avoid "Too many authentication failures" when
+# the ssh-agent has multiple keys loaded and the server has low MaxAuthTries.
+spawn $proto -o PreferredAuthentications=keyboard-interactive,password $dest
 
 # Handle window resize - propagate to spawned process
 trap {
