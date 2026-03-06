@@ -726,7 +726,7 @@ class ViperApp(App):
                     yield ListView(id="host-list-left")
                     yield ListView(id="host-list-right")
         with Container(id="status-bar"):
-            yield Static(">> Select environment  [dim red]↑↓ navigate  Enter select  ? help  q quit[/]", id="target-display")
+            yield Static(">> Select environment  [bold red]↑↓[/] [dim]navigate[/]  [bold red]Enter[/] [dim]select[/]  [bold red]?[/] [dim]help[/]  [bold red]q[/] [dim]quit[/]", id="target-display")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -805,7 +805,7 @@ class ViperApp(App):
             self._refresh_host_list()
             # Update title to show preview
             self.query_one("#host-panel").border_title = f"HOSTS :: {event.item.display_name.upper()}"
-            self._update_status(f"{event.item.display_name}: {len(hosts)} hosts  [dim red]Enter to select  ↑↓ browse[/]")
+            self._update_status(f"{event.item.display_name}: {len(hosts)} hosts  [bold red]Enter[/] [dim]select[/]  [bold red]↑↓[/] [dim]browse[/]")
 
     @on(ListView.Selected, "#env-list")
     def on_env_selected(self, event: ListView.Selected) -> None:
@@ -835,7 +835,7 @@ class ViperApp(App):
         else:
             self.filtered_hosts = self.current_hosts.copy()
         self._refresh_host_list()
-        self._update_status(f"Filter: {len(self.filtered_hosts)} matches  [dim red]Enter to jump  Esc to exit search[/]")
+        self._update_status(f"Filter: {len(self.filtered_hosts)} matches  [bold red]Enter[/] [dim]jump[/]  [bold red]Esc[/] [dim]exit search[/]")
 
     @on(Input.Submitted, "#search-box")
     def on_search_submitted(self, event: Input.Submitted) -> None:
@@ -869,14 +869,21 @@ class ViperApp(App):
         env_list.index = restore_index
         if env_list.children and restore_index < len(env_list.children):
             env_list.scroll_to_widget(env_list.children[restore_index])
-        self._update_status("Select environment  [dim red]↑↓ navigate  Enter select  ? help  q quit[/]")
+        self._update_status("Select environment  [bold red]↑↓[/] [dim]navigate[/]  [bold red]Enter[/] [dim]select[/]  [bold red]?[/] [dim]help[/]  [bold red]q[/] [dim]quit[/]")
         self.query_one("#host-panel").border_title = "HOSTS"
         self.call_later(env_list.focus)
 
     def _show_host_nav_status(self) -> None:
         """Show status bar for host navigation."""
         env = self._get_current_env() or "?"
-        self._update_status(f"[bold]{env}[/]  [dim red]↑↓ navigate  Enter ssh  s sftp  / search  Esc back[/]")
+        self._update_status(
+            f"[bold]{env}[/]  "
+            f"[bold red]↑↓[/] [dim]navigate[/]  "
+            f"[bold red]Enter[/] [dim]ssh[/]  "
+            f"[bold red]s[/] [dim]sftp[/]  "
+            f"[bold red]/[/] [dim]search[/]  "
+            f"[bold red]Esc[/] [dim]back[/]"
+        )
 
     def action_back(self) -> None:
         """Go back - right column to left, left column to environments."""
@@ -914,7 +921,7 @@ class ViperApp(App):
         if env_list.index is not None:
             self._saved_env_index = env_list.index
         self.query_one("#search-box", Input).focus()
-        self._update_status("Search mode  [dim red]Type to filter  Enter to jump  Esc to exit[/]")
+        self._update_status("Search mode  [dim]type to filter[/]  [bold red]Enter[/] [dim]jump[/]  [bold red]Esc[/] [dim]exit[/]")
 
     def action_help(self) -> None:
         """Show help screen."""
