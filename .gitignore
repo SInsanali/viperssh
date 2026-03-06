@@ -6,6 +6,7 @@ __pycache__/
 .viperssh_initialized
 .viper_theme
 .viper_history
+.viper_favorites
 .viper_vault
 .viper_vault_pass
 .viper_vault_config

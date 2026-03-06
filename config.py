@@ -16,6 +16,7 @@ class HostInfo:
 
     display_name: str
     target: str
+    is_alias: bool = False
 
 
 class Config:
@@ -79,22 +80,76 @@ class Config:
                 result.append(HostInfo(h, h))
             elif isinstance(h, dict) and len(h) == 1:
                 alias, target = next(iter(h.items()))
-                result.append(HostInfo(alias, target))
+                result.append(HostInfo(alias, target, is_alias=True))
         return result
 
-    def build_target(self, environment: str, hostname: str) -> str:
+    def build_target(self, environment: str, hostname: str, is_alias: bool = False) -> str:
         """Build the full connection target for a host.
 
-        If hostname contains '.' or '@', use as-is.
+        If hostname contains '.' or '@', or is an alias (dict-mapped), use as-is.
         Otherwise, append the environment suffix.
         """
-        if "." in hostname or "@" in hostname:
+        if is_alias or "." in hostname or "@" in hostname:
             return hostname
         return f"{hostname}{self.get_suffix(environment)}"
 
 
+FAVORITES_FILE = Path(__file__).resolve().parent / ".viper_favorites"
+
 HISTORY_FILE = Path(__file__).resolve().parent / ".viper_history"
 MAX_HISTORY = 10
+
+
+class Favorites:
+    """Manages favorite hosts stored in a local JSON file."""
+
+    def load(self) -> list[dict]:
+        """Return list of favorite dicts, newest first."""
+        if not FAVORITES_FILE.exists():
+            return []
+        try:
+            return json.loads(FAVORITES_FILE.read_text())
+        except (OSError, json.JSONDecodeError):
+            return []
+
+    def _save(self, entries: list[dict]) -> None:
+        try:
+            FAVORITES_FILE.write_text(json.dumps(entries))
+            os.chmod(FAVORITES_FILE, 0o600)
+        except OSError:
+            pass
+
+    def add(self, target: str, display_name: str, env_name: str, is_alias: bool = False) -> None:
+        """Add a host to favorites, deduplicating by target+env_name."""
+        entries = [
+            e for e in self.load()
+            if not (e.get("target") == target and e.get("env_name") == env_name)
+        ]
+        entry = {
+            "target": target,
+            "display_name": display_name,
+            "env_name": env_name,
+            "ts": time.time(),
+        }
+        if is_alias:
+            entry["is_alias"] = True
+        entries.insert(0, entry)
+        self._save(entries)
+
+    def remove(self, target: str, env_name: str) -> None:
+        """Remove a host from favorites."""
+        entries = [
+            e for e in self.load()
+            if not (e.get("target") == target and e.get("env_name") == env_name)
+        ]
+        self._save(entries)
+
+    def is_favorite(self, target: str, env_name: str) -> bool:
+        """Check if a host is in favorites."""
+        return any(
+            e.get("target") == target and e.get("env_name") == env_name
+            for e in self.load()
+        )
 
 
 class History:

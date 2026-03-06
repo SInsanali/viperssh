@@ -18,7 +18,7 @@ from textual.containers import Container, Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Footer, Input, Label, ListItem, ListView, Static
 
-from config import Config, History, HostInfo
+from config import Config, Favorites, History, HostInfo
 from vault import Vault
 
 
@@ -171,6 +171,7 @@ HELP_TEXT = """[bold red]  NAVIGATION[/]
   [bold red]t[/]             Theme selector
   [bold red]r[/]             Recent connections
   [bold red]v[/]             Password vault
+  [bold red]f[/]             Toggle favorite
   [bold red]s[/]             SFTP connect
   [bold red]q[/]             Quit
 [dim]──────────────────────────────────[/]
@@ -684,6 +685,44 @@ class HostListItem(ListItem):
         super().__init__(*args, **kwargs)
         self.display_name = host_info.display_name
         self.target = host_info.target
+        self.is_alias = host_info.is_alias
+
+    def compose(self) -> ComposeResult:
+        yield Label(f"  {self.display_name}", classes="item-label")
+
+    def watch_highlighted(self, highlighted: bool) -> None:
+        try:
+            label = self.query_one(".item-label")
+        except Exception:
+            return
+        if highlighted:
+            label.update(f"[bold red]> {self.display_name}[/]")
+        else:
+            label.update(f"  {self.display_name}")
+
+
+class FavSectionItem(ListItem):
+    """A non-interactive section header in the favorites list."""
+
+    def __init__(self, env_display: str, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.env_display = env_display
+        self.disabled = True
+
+    def compose(self) -> ComposeResult:
+        line = "\u2500" * 30
+        yield Label(f"[bold yellow]{self.env_display}[/] [dim]{line}[/]", classes="section-label")
+
+    def watch_highlighted(self, highlighted: bool) -> None:
+        pass
+
+
+class FavHostListItem(HostListItem):
+    """A host list item from the favorites pseudo-environment."""
+
+    def __init__(self, host_info: HostInfo, env_name: str, *args, **kwargs) -> None:
+        super().__init__(host_info, *args, **kwargs)
+        self.env_name = env_name
 
     def compose(self) -> ComposeResult:
         yield Label(f"  {self.display_name}", classes="item-label")
@@ -898,6 +937,7 @@ class ViperApp(App):
         Binding("t", "open_themes", "Themes"),
         Binding("r", "open_history", "Recent"),
         Binding("v", "open_vault", "Vault"),
+        Binding("f", "toggle_favorite", "Fav", show=False),
         Binding("s", "sftp", "SFTP", show=False),
         Binding("q", "quit", "Quit"),
         Binding("tab", "switch_panel", "Switch", show=False),
@@ -911,6 +951,8 @@ class ViperApp(App):
         super().__init__()
         self.config = Config(config_dir)
         self.vault = vault or Vault()
+        self.favorites = Favorites()
+        self._fav_env_map: dict[str, str] = {}  # target -> env_name for favorites
         self.selected_env: Optional[str] = None
         self.current_hosts: list[HostInfo] = []
         self.filtered_hosts: list[HostInfo] = []
@@ -998,6 +1040,11 @@ class ViperApp(App):
         env_list = self.query_one("#env-list", ListView)
         env_list.clear()
 
+        # Insert favorites pseudo-environment at top if any exist
+        fav_entries = self.favorites.load()
+        if fav_entries:
+            env_list.append(EnvListItem("__favorites__", "\u2605 Favorites", len(fav_entries)))
+
         for env in self.config.environments:
             hosts = self.config.get_hosts(env)
             display_name = self.config.display_name(env)
@@ -1006,7 +1053,17 @@ class ViperApp(App):
     def _populate_hosts(self, environment: str) -> None:
         """Populate the host list for the selected environment."""
         self.selected_env = environment
-        self.current_hosts = self.config.get_hosts(environment)
+        self._fav_env_map.clear()
+
+        if environment == "__favorites__":
+            fav_entries = sorted(self.favorites.load(), key=lambda e: e.get("env_name", ""))
+            self.current_hosts = []
+            for entry in fav_entries:
+                self.current_hosts.append(HostInfo(entry["display_name"], entry["target"], entry.get("is_alias", False)))
+                self._fav_env_map[entry["target"]] = entry["env_name"]
+        else:
+            self.current_hosts = self.config.get_hosts(environment)
+
         self.filtered_hosts = self.current_hosts.copy()
 
         # Clear search
@@ -1016,8 +1073,11 @@ class ViperApp(App):
         self._refresh_host_list()
 
         # Update title
-        display = self.config.display_name(environment)
-        self.query_one("#host-panel").border_title = f"HOSTS :: {display.upper()}"
+        if environment == "__favorites__":
+            self.query_one("#host-panel").border_title = "HOSTS :: \u2605 FAVORITES"
+        else:
+            display = self.config.display_name(environment)
+            self.query_one("#host-panel").border_title = f"HOSTS :: {display.upper()}"
 
     def _refresh_host_list(self) -> None:
         """Refresh the host list with current filter - split into two columns."""
@@ -1026,15 +1086,27 @@ class ViperApp(App):
         left_list.clear()
         right_list.clear()
 
-        # Split hosts into two columns
-        mid = (len(self.filtered_hosts) + 1) // 2
-        left_hosts = self.filtered_hosts[:mid]
-        right_hosts = self.filtered_hosts[mid:]
+        is_fav = self.selected_env == "__favorites__"
 
-        for host_info in left_hosts:
-            left_list.append(HostListItem(host_info))
-        for host_info in right_hosts:
-            right_list.append(HostListItem(host_info))
+        if is_fav:
+            # Single-column with section headers grouped by environment
+            current_env = None
+            for host_info in self.filtered_hosts:
+                env = self._fav_env_map.get(host_info.target, "")
+                if env != current_env:
+                    current_env = env
+                    left_list.append(FavSectionItem(self.config.display_name(env)))
+                left_list.append(FavHostListItem(host_info, env))
+        else:
+            # Split hosts into two columns
+            mid = (len(self.filtered_hosts) + 1) // 2
+            left_hosts = self.filtered_hosts[:mid]
+            right_hosts = self.filtered_hosts[mid:]
+
+            for host_info in left_hosts:
+                left_list.append(HostListItem(host_info))
+            for host_info in right_hosts:
+                right_list.append(HostListItem(host_info))
 
     def _update_status(self, message: str) -> None:
         """Update the status bar."""
@@ -1045,12 +1117,27 @@ class ViperApp(App):
     def on_env_highlighted(self, event: ListView.Highlighted) -> None:
         """Preview hosts when hovering over an environment."""
         if isinstance(event.item, EnvListItem) and self.selected_env is None:
-            # Show preview of hosts for this environment
-            hosts = self.config.get_hosts(event.item.env_name)
+            env_name = event.item.env_name
+            self._fav_env_map.clear()
+
+            if env_name == "__favorites__":
+                fav_entries = sorted(self.favorites.load(), key=lambda e: e.get("env_name", ""))
+                hosts = []
+                for entry in fav_entries:
+                    hosts.append(HostInfo(entry["display_name"], entry["target"], entry.get("is_alias", False)))
+                    self._fav_env_map[entry["target"]] = entry["env_name"]
+                # Temporarily set selected_env so _refresh_host_list uses FavHostListItem
+                self.selected_env = "__favorites__"
+            else:
+                hosts = self.config.get_hosts(env_name)
+
             self.current_hosts = hosts
             self.filtered_hosts = hosts.copy()
             self._refresh_host_list()
-            # Update title to show preview
+
+            if env_name == "__favorites__":
+                self.selected_env = None  # Reset — we're just previewing
+
             self.query_one("#host-panel").border_title = f"HOSTS :: {event.item.display_name.upper()}"
             self._update_status(f"{event.item.display_name}: {len(hosts)} hosts  [bold red]Enter[/] [dim]select[/]  [bold red]↑↓[/] [dim]browse[/]")
 
@@ -1066,10 +1153,15 @@ class ViperApp(App):
     @on(ListView.Selected, "#host-list-right")
     def on_host_selected(self, event: ListView.Selected) -> None:
         """Handle host selection - connect to the host."""
-        if isinstance(event.item, HostListItem):
+        if isinstance(event.item, FavHostListItem):
+            env = event.item.env_name
+            target = self.config.build_target(env, event.item.target, event.item.is_alias)
+            self._update_status(f"Initiating connection: {target}")
+            self._connect(target, env_name_override=env)
+        elif isinstance(event.item, HostListItem):
             env = self._get_current_env()
             if env:
-                target = self.config.build_target(env, event.item.target)
+                target = self.config.build_target(env, event.item.target, event.item.is_alias)
                 self._update_status(f"Initiating connection: {target}")
                 self._connect(target)
 
@@ -1123,11 +1215,13 @@ class ViperApp(App):
     def _show_host_nav_status(self) -> None:
         """Show status bar for host navigation."""
         env = self._get_current_env() or "?"
+        display_env = "\u2605 Favorites" if env == "__favorites__" else env
         self._update_status(
-            f"[bold]{env}[/]  "
+            f"[bold]{display_env}[/]  "
             f"[bold red]↑↓[/] [dim]navigate[/]  "
             f"[bold red]Enter[/] [dim]ssh[/]  "
             f"[bold red]s[/] [dim]sftp[/]  "
+            f"[bold red]f[/] [dim]fav[/]  "
             f"[bold red]/[/] [dim]search[/]  "
             f"[bold red]Esc[/] [dim]back[/]"
         )
@@ -1199,11 +1293,50 @@ class ViperApp(App):
         right_list = self.query_one("#host-list-right", ListView)
         if left_list.has_focus or right_list.has_focus:
             focused = left_list if left_list.has_focus else right_list
-            hostname = self._get_selected_host(focused)
+            item = self._get_selected_item(focused)
+            if isinstance(item, FavHostListItem):
+                target = self.config.build_target(item.env_name, item.target, item.is_alias)
+                self._connect(target, proto="sftp", env_name_override=item.env_name)
+            elif isinstance(item, HostListItem):
+                env = self._get_current_env()
+                if env:
+                    target = self.config.build_target(env, item.target, item.is_alias)
+                    self._connect(target, proto="sftp")
+
+    def action_toggle_favorite(self) -> None:
+        """Toggle favorite on the highlighted host."""
+        left_list = self.query_one("#host-list-left", ListView)
+        right_list = self.query_one("#host-list-right", ListView)
+        if not (left_list.has_focus or right_list.has_focus):
+            return
+        focused = left_list if left_list.has_focus else right_list
+        item = self._get_selected_item(focused)
+        if not item:
+            return
+
+        if isinstance(item, FavHostListItem):
+            # Remove from favorites
+            self.favorites.remove(item.target, item.env_name)
+            self.notify(f"Removed {item.display_name} from favorites", timeout=2)
+            # Refresh the favorites view
+            self._populate_hosts("__favorites__")
+            self._populate_environments()
+            # If no more favorites, go back to env list
+            if not self.favorites.load():
+                self._return_to_env_list()
+            else:
+                self._focus_host_list()
+        else:
+            # Add to favorites — resolve env_name from current context
             env = self._get_current_env()
-            if hostname and env:
-                target = self.config.build_target(env, hostname)
-                self._connect(target, proto="sftp")
+            if env and env != "__favorites__":
+                if self.favorites.is_favorite(item.target, env):
+                    self.favorites.remove(item.target, env)
+                    self.notify(f"Removed {item.display_name} from favorites", timeout=2)
+                else:
+                    self.favorites.add(item.target, item.display_name, env, item.is_alias)
+                    self.notify(f"Added {item.display_name} to favorites \u2605", timeout=2)
+                self._populate_environments()
 
     def action_switch_panel(self) -> None:
         """Switch focus between environment and host panels."""
@@ -1248,10 +1381,15 @@ class ViperApp(App):
         self._clear_host_highlights()
         left_list = self.query_one("#host-list-left", ListView)
         left_list.focus()
-        mid = (len(self.filtered_hosts) + 1) // 2
-        if mid > 0:
-            target_row = min(row, mid - 1)
-            self.call_later(lambda: setattr(left_list, "index", target_row))
+        if self.selected_env == "__favorites__":
+            # Skip section header at index 0
+            if left_list.children:
+                self.call_later(lambda: setattr(left_list, "index", 1))
+        else:
+            mid = (len(self.filtered_hosts) + 1) // 2
+            if mid > 0:
+                target_row = min(row, mid - 1)
+                self.call_later(lambda: setattr(left_list, "index", target_row))
 
     def _focus_right_list(self, row: int = 0) -> None:
         """Focus right host column and highlight specified row."""
@@ -1283,6 +1421,14 @@ class ViperApp(App):
             item = list_view.children[list_view.index]
             if isinstance(item, HostListItem):
                 return item.target
+        return None
+
+    def _get_selected_item(self, list_view: ListView) -> Optional[HostListItem]:
+        """Get the selected HostListItem (or FavHostListItem) in a list view."""
+        if list_view.index is not None and list_view.index < len(list_view.children):
+            item = list_view.children[list_view.index]
+            if isinstance(item, HostListItem):
+                return item
         return None
 
     def _get_current_env(self) -> Optional[str]:
@@ -1329,15 +1475,19 @@ class ViperApp(App):
 
     def _connect_to_selected_host(self, list_view: ListView) -> None:
         """Connect to the selected host in the given list view."""
-        hostname = self._get_selected_host(list_view)
-        env = self._get_current_env()
-        if hostname and env:
-            target = self.config.build_target(env, hostname)
-            self._connect(target)
+        item = self._get_selected_item(list_view)
+        if isinstance(item, FavHostListItem):
+            target = self.config.build_target(item.env_name, item.target, item.is_alias)
+            self._connect(target, env_name_override=item.env_name)
+        elif isinstance(item, HostListItem):
+            env = self._get_current_env()
+            if env:
+                target = self.config.build_target(env, item.target, item.is_alias)
+                self._connect(target)
 
-    def _connect(self, target: str, proto: str = "ssh") -> None:
+    def _connect(self, target: str, proto: str = "ssh", env_name_override: Optional[str] = None) -> None:
         """Connect to the specified target via SSH or SFTP."""
-        env_name = self._get_current_env()
+        env_name = env_name_override or self._get_current_env()
         History().add(target, proto=proto, env_name=env_name or "")
         self.exit(result=ConnectionRequest(target=target, proto=proto, env_name=env_name))
 
