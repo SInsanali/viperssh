@@ -1,6 +1,7 @@
 """Configuration loading for ViperSSH."""
 
 import json
+import os
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,7 +22,7 @@ class Config:
     """Loads and manages ViperSSH configuration from hosts.yaml."""
 
     def __init__(self, config_dir: Optional[Path] = None) -> None:
-        self.config_dir = Path(config_dir) if config_dir else Path(__file__).parent / "etc"
+        self.config_dir = Path(config_dir) if config_dir else Path(__file__).resolve().parent / "etc"
         self.config_file = self.config_dir / "hosts.yaml"
         self._data: dict = {}
         self._environments: list[str] = []
@@ -92,7 +93,7 @@ class Config:
         return f"{hostname}{self.get_suffix(environment)}"
 
 
-HISTORY_FILE = Path(__file__).parent / ".viper_history"
+HISTORY_FILE = Path(__file__).resolve().parent / ".viper_history"
 MAX_HISTORY = 10
 
 
@@ -108,15 +109,19 @@ class History:
         except (OSError, json.JSONDecodeError):
             return []
 
-    def add(self, target: str, proto: str = "ssh") -> None:
+    def add(self, target: str, proto: str = "ssh", env_name: str = "") -> None:
         """Add target to history, deduplicating and trimming to MAX_HISTORY."""
         entries = [
             e for e in self.load()
             if not (e.get("target") == target and e.get("proto", "ssh") == proto)
         ]
-        entries.insert(0, {"target": target, "ts": time.time(), "proto": proto})
+        entry = {"target": target, "ts": time.time(), "proto": proto}
+        if env_name:
+            entry["env"] = env_name
+        entries.insert(0, entry)
         entries = entries[:MAX_HISTORY]
         try:
             HISTORY_FILE.write_text(json.dumps(entries))
+            os.chmod(HISTORY_FILE, 0o600)
         except OSError:
             pass

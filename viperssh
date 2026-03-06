@@ -330,9 +330,11 @@ if [[ "$1" == "--help" ]] || [[ "$1" == "-h" ]]; then
     echo "Usage: viperssh [OPTIONS]"
     echo ""
     echo "Options:"
-    echo "  --setup    Run first-time setup (symlink creation)"
-    echo "  --check    Check system dependencies"
-    echo "  -h, --help Show this help message"
+    echo "  --last       Reconnect to the most recent connection"
+    echo "  --show-last  Show the most recent connection and exit"
+    echo "  --setup      Run first-time setup (symlink creation)"
+    echo "  --check      Check system dependencies"
+    echo "  -h, --help   Show this help message"
     echo ""
     exit 0
 fi
@@ -400,7 +402,7 @@ create_venv() {
 }
 
 # Check if venv exists and has dependencies, if not create/fix it
-if [[ ! -f "$VENV_DIR/bin/python3" ]] || ! "$VENV_DIR/bin/python3" -c "import textual" 2>/dev/null; then
+if [[ ! -f "$VENV_DIR/bin/python3" ]] || ! "$VENV_DIR/bin/python3" -c "import textual; import cryptography" 2>/dev/null; then
     # Check if pip works in existing venv
     if [[ -f "$VENV_DIR/bin/python3" ]] && "$VENV_DIR/bin/python3" -m pip --version &>/dev/null; then
         echo -e "${CYAN}>> Reinstalling dependencies...${RESET}"

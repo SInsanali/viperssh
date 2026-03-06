@@ -18,6 +18,20 @@ if {$dest eq ""} {
 # Cached password (empty until first prompt)
 set cached_password ""
 
+# Vault password tracking
+set vault_password_used 0
+set vault_password_failed 0
+set password_attempts 0
+
+if {[info exists env(VIPER_PASSWORD)]} {
+    set cached_password $env(VIPER_PASSWORD)
+    set vault_password_used 1
+    # Debug (uncomment to trace vault password injection):
+    # set _sum 0; foreach _c [split $cached_password ""] { scan $_c %c _code; incr _sum $_code }
+    # puts "\[DEBUG\] VIPER_PASSWORD len=[string length $cached_password] sum=$_sum"
+    unset env(VIPER_PASSWORD)
+}
+
 # Handle Ctrl+C - restore terminal and exit cleanly
 trap {
     stty echo
@@ -62,7 +76,7 @@ log_user 0
 # ==== START SESSION ====
 # Skip key-based auth to avoid "Too many authentication failures" when
 # the ssh-agent has multiple keys loaded and the server has low MaxAuthTries.
-spawn $proto -o PreferredAuthentications=keyboard-interactive,password $dest
+spawn $proto -o PreferredAuthentications=keyboard-interactive,password -o ServerAliveInterval=60 -o ServerAliveCountMax=3 $dest
 
 # Handle window resize - propagate to spawned process
 trap {
@@ -94,14 +108,26 @@ expect {
     }
 
     -re "\[Pp\]assword:" {
+        incr password_attempts
         if {$cached_password eq ""} {
-            # First password prompt - ask user and cache it
+            # No password yet - ask user and cache it
             set cached_password [read_password]
+            send "$cached_password\r"
+            exp_continue
+        } elseif {$password_attempts > 2 && $vault_password_used && !$vault_password_failed} {
+            # Vault password rejected after multiple rounds, ask user
+            set vault_password_failed 1
+            set cached_password ""
+            set cached_password [read_password]
+            # Debug (uncomment to trace user-typed password):
+            # set _sum 0; foreach _c [split $cached_password ""] { scan $_c %c _code; incr _sum $_code }
+            # puts "\[DEBUG\] user typed: len=[string length $cached_password] sum=$_sum"
+            send "$cached_password\r"
+            exp_continue
+        } else {
+            send "$cached_password\r"
+            exp_continue
         }
-
-        # Send cached password
-        send "$cached_password\r"
-        exp_continue
     }
 
     eof {
@@ -123,11 +149,62 @@ expect {
     }
 }
 
+# Determine exit code based on vault usage
+if {$vault_password_failed} {
+    set viper_exit 12
+} elseif {$vault_password_used} {
+    set viper_exit 10
+} else {
+    set viper_exit 11
+}
+
+# Prompt to save/update password right after successful login
+if {[info exists env(VIPER_PW_FD)] && $cached_password ne ""} {
+    set pw_fd $env(VIPER_PW_FD)
+    set should_prompt 0
+
+    if {$viper_exit == 11} {
+        # User typed password manually, vault has no saved pw for this env
+        set should_prompt 1
+        set prompt_msg "\n\[VAULT\] Save password? (y/n) "
+    } elseif {$viper_exit == 12} {
+        # Vault password failed, user typed a new one
+        set should_prompt 1
+        set prompt_msg "\n\[VAULT\] Update saved password? (y/n) "
+    }
+
+    if {$should_prompt} {
+        puts -nonewline $prompt_msg
+        flush stdout
+        expect_user {
+            -re "(\[^\r\n]*)\[\r\n]" {
+                set answer $expect_out(1,string)
+            }
+        }
+        puts ""
+
+        if {[string tolower [string trim $answer]] eq "y"} {
+            # Debug (uncomment to trace pipe write):
+            # set _sum 0; foreach _c [split $cached_password ""] { scan $_c %c _code; incr _sum $_code }
+            # puts "\[DEBUG\] writing to pipe: len=[string length $cached_password] sum=$_sum"
+            if {[catch {
+                set chan [open "/proc/self/fd/$pw_fd" w]
+                puts -nonewline $chan $cached_password
+                close $chan
+            } err]} {
+                puts "\[VAULT\] Failed to save: $err"
+            } else {
+                puts "\[VAULT\] Saved."
+            }
+        }
+    }
+
+    unset -nocomplain env(VIPER_PW_FD)
+}
+
 # Clear password from memory before interactive mode
 set cached_password ""
 
-interact {
-    -timeout 180 {
-        send " \b"
-    }
-}
+interact
+
+exit $viper_exit

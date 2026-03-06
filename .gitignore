@@ -6,6 +6,9 @@ __pycache__/
 .viperssh_initialized
 .viper_theme
 .viper_history
+.viper_vault
+.viper_vault_pass
+.viper_vault_config
 
 # Dev tools (not needed by end users)
 CLAUDE.md

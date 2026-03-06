@@ -2,6 +2,7 @@
 """ViperSSH - A TUI SSH connection manager."""
 
 import argparse
+import getpass
 import os
 import signal
 import subprocess
@@ -18,6 +19,7 @@ from textual.screen import ModalScreen
 from textual.widgets import Footer, Input, Label, ListItem, ListView, Static
 
 from config import Config, History, HostInfo
+from vault import Vault
 
 
 class ConnectionRequest(NamedTuple):
@@ -25,6 +27,7 @@ class ConnectionRequest(NamedTuple):
 
     target: str
     proto: str = "ssh"
+    env_name: Optional[str] = None
 
 
 # Theme definitions
@@ -136,7 +139,7 @@ THEMES = {
     },
 }
 
-THEME_CONFIG_FILE = Path(__file__).parent / ".viper_theme"
+THEME_CONFIG_FILE = Path(__file__).resolve().parent / ".viper_theme"
 
 # ASCII Art Banner
 VIPER_BANNER = """
@@ -149,30 +152,29 @@ VIPER_BANNER = """
 [dim green]═══════════════════════════════════════════════════════════════[/]"""
 
 # Help menu content
-HELP_TEXT = """[bold red]╔══════════════════════════════════════╗
-║        VIPERSSH QUICK MENU           ║
-╠══════════════════════════════════════╣[/]
-[bold green]  NAVIGATION[/]
-[dim]  ─────────────────────────────────[/]
-  [bold red]↑ ↓[/]  [dim]or[/]  [bold red]j k[/]    Move up/down
-  [bold red]→[/]  [dim]or[/]  [bold red]Enter[/]   Select / Enter
-  [bold red]←[/]  [dim]or[/]  [bold red]Esc[/]     Go back
-  [bold red]Tab[/]            Switch panels
+HELP_TEXT = """[bold red]  NAVIGATION[/]
+[dim]  ──────────────────────────────[/]
+  [bold red]↑ ↓[/]  [dim]or[/]  [bold red]j k[/]   Move up/down
+  [bold red]→[/]  [dim]or[/]  [bold red]Enter[/]  Select / Enter
+  [bold red]←[/]  [dim]or[/]  [bold red]Esc[/]    Go back
+  [bold red]Tab[/]           Switch panels
 
 [bold green]  SEARCH[/]
-[dim]  ─────────────────────────────────[/]
-  [bold red]/[/]              Focus search box
-  [bold red]Esc[/]            Exit search
-  [bold red]Enter[/]          Jump to results
+[dim]  ──────────────────────────────[/]
+  [bold red]/[/]             Focus search box
+  [bold red]Esc[/]           Exit search
+  [bold red]Enter[/]         Jump to results
 
-[bold green]  ACTIONS[/]
-[dim]  ─────────────────────────────────[/]
-  [bold red]?[/]  [dim]or[/]  [bold red]h[/]       Toggle this menu
-  [bold red]t[/]              Theme selector
-  [bold red]q[/]              Quit
-
-[bold red]╚══════════════════════════════════════╝[/]
-[dim]        Press any key to close[/]"""
+[bold #ff00ff]  ACTIONS[/]
+[dim]  ──────────────────────────────[/]
+  [bold red]?[/]  [dim]or[/]  [bold red]h[/]      Toggle this menu
+  [bold red]t[/]             Theme selector
+  [bold red]r[/]             Recent connections
+  [bold red]v[/]             Password vault
+  [bold red]s[/]             SFTP connect
+  [bold red]q[/]             Quit
+[dim]──────────────────────────────────[/]
+[dim]       Press any key to close[/]"""
 
 
 class HelpScreen(ModalScreen):
@@ -185,7 +187,9 @@ class HelpScreen(ModalScreen):
     ]
 
     def compose(self) -> ComposeResult:
-        yield Static(HELP_TEXT, id="help-box")
+        with Vertical(id="help-container"):
+            yield Static("[bold red]QUICK MENU[/]", id="help-title")
+            yield Static(HELP_TEXT, id="help-body")
 
     def on_key(self, event) -> None:
         self.dismiss()
@@ -204,19 +208,19 @@ class ThemeListItem(ListItem):
         self.is_active = is_active
 
     def compose(self) -> ComposeResult:
-        marker = "[bold green]●[/] " if self.is_active else "  "
-        yield Label(f"{marker}{self.theme_name}", classes="theme-label")
+        marker = "[bold green]●[/]" if self.is_active else "[dim]○[/]"
+        yield Label(f"  {marker} {self.theme_name}", classes="theme-label")
 
     def watch_highlighted(self, highlighted: bool) -> None:
         try:
             label = self.query_one(".theme-label")
         except Exception:
             return
-        marker = "[bold green]●[/] " if self.is_active else "  "
+        marker = "[bold green]●[/]" if self.is_active else "[dim]○[/]"
         if highlighted:
-            label.update(f"[bold red]>[/] {marker}[bold]{self.theme_name}[/]")
+            label.update(f"[bold red]>[/] {marker} [bold]{self.theme_name}[/]")
         else:
-            label.update(f" {marker}{self.theme_name}")
+            label.update(f"  {marker} {self.theme_name}")
 
 
 class ThemeScreen(ModalScreen):
@@ -237,7 +241,7 @@ class ThemeScreen(ModalScreen):
     }
 
     #theme-container {
-        width: 40;
+        width: 50;
         height: auto;
         background: #0d0d0d;
         border: heavy #ff0000;
@@ -253,7 +257,7 @@ class ThemeScreen(ModalScreen):
 
     #theme-list {
         height: auto;
-        max-height: 12;
+        max-height: 16;
     }
 
     #theme-list > ListItem {
@@ -263,12 +267,19 @@ class ThemeScreen(ModalScreen):
     #theme-list > ListItem.--highlight {
         background: #330000;
     }
+
+    #theme-hint {
+        text-align: center;
+        color: #666666;
+        padding-top: 1;
+    }
     """
 
     def compose(self) -> ComposeResult:
         with Vertical(id="theme-container"):
             yield Static("[bold red]SELECT THEME[/]", id="theme-title")
             yield ListView(id="theme-list")
+            yield Static("[dim]Enter[/] apply  [dim]Esc[/] close", id="theme-hint")
 
     def on_mount(self) -> None:
         """Populate theme list."""
@@ -316,9 +327,10 @@ class HistoryListItem(ListItem):
 
     def _label_text(self, highlighted: bool = False) -> str:
         rel = _relative_time(self.ts)
+        proto_tag = f" [dim cyan][{self.proto}][/]" if self.proto != "ssh" else ""
         if highlighted:
-            return f"[bold red]> {self.target}[/]  [dim yellow]{rel}[/]"
-        return f"  {self.target}  [dim yellow]{rel}[/]"
+            return f"[bold red]>[/] {self.target}{proto_tag}  [dim yellow]{rel}[/]"
+        return f"  {self.target}{proto_tag}  [dim yellow]{rel}[/]"
 
     def compose(self) -> ComposeResult:
         yield Label(self._label_text(), classes="history-label")
@@ -341,7 +353,7 @@ class HistorySectionItem(ListItem):
         self.disabled = True
 
     def compose(self) -> ComposeResult:
-        line = "─" * 44
+        line = "─" * 38
         yield Label(f"[bold {self.color}]{self.title}[/] [dim]{line}[/]", classes="section-label")
 
     def watch_highlighted(self, highlighted: bool) -> None:
@@ -366,7 +378,7 @@ class HistoryScreen(ModalScreen):
     }
 
     #history-container {
-        width: 62;
+        width: 50;
         height: auto;
         background: #0d0d0d;
         border: heavy #ff00ff;
@@ -398,6 +410,12 @@ class HistoryScreen(ModalScreen):
         color: #444444;
         padding: 1 0;
     }
+
+    #history-hint {
+        text-align: center;
+        color: #666666;
+        padding-top: 1;
+    }
     """
 
     def compose(self) -> ComposeResult:
@@ -405,6 +423,7 @@ class HistoryScreen(ModalScreen):
             yield Static("[bold #ff00ff]RECENT CONNECTIONS[/]", id="history-title")
             yield ListView(id="history-list")
             yield Static("", id="history-empty")
+            yield Static("[dim]Enter[/] connect  [dim]Esc[/] close", id="history-hint")
 
     def on_mount(self) -> None:
         history = History().load()
@@ -441,6 +460,221 @@ class HistoryScreen(ModalScreen):
 
     def action_cursor_up(self) -> None:
         self.query_one("#history-list", ListView).action_cursor_up()
+
+
+class VaultEnvListItem(ListItem):
+    """A list item representing an environment in the vault modal."""
+
+    def __init__(self, env_name: str, has_password: bool, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.env_name = env_name
+        self.has_password = has_password
+
+    def _label_text(self, highlighted: bool = False) -> str:
+        if self.has_password:
+            marker = "[bold green]●[/]"
+            tag = " [dim green]saved[/]"
+        else:
+            marker = "[dim red]○[/]"
+            tag = " [dim red]no pw[/]"
+        name = self.env_name.replace("_", " ")
+        if highlighted:
+            return f"[bold red]>[/] {marker} [bold]{name}[/]{tag}"
+        return f"  {marker} {name}{tag}"
+
+    def compose(self) -> ComposeResult:
+        yield Label(self._label_text(), classes="vault-env-label")
+
+    def watch_highlighted(self, highlighted: bool) -> None:
+        try:
+            label = self.query_one(".vault-env-label")
+        except Exception:
+            return
+        label.update(self._label_text(highlighted))
+
+
+class VaultScreen(ModalScreen):
+    """Modal vault management screen."""
+
+    BINDINGS = [
+        Binding("escape", "dismiss", "Close"),
+        Binding("v", "dismiss", "Close"),
+        Binding("q", "dismiss", "Close"),
+        Binding("e", "toggle_vault", "Toggle"),
+        Binding("d", "delete_password", "Delete"),
+        Binding("j", "cursor_down", "Down", show=False),
+        Binding("k", "cursor_up", "Up", show=False),
+    ]
+
+    CSS = """
+    VaultScreen {
+        align: center middle;
+        background: rgba(0, 0, 0, 0.85);
+    }
+
+    #vault-container {
+        width: 50;
+        height: auto;
+        background: #0d0d0d;
+        border: heavy #ff00ff;
+        padding: 1 2;
+    }
+
+    #vault-title {
+        text-align: center;
+        text-style: bold;
+        color: #ff00ff;
+        padding-bottom: 1;
+    }
+
+    #vault-status {
+        text-align: center;
+        padding-bottom: 1;
+    }
+
+    #vault-separator {
+        color: #333333;
+        padding-bottom: 1;
+    }
+
+    #vault-env-list {
+        height: auto;
+        max-height: 16;
+    }
+
+    #vault-env-list > ListItem {
+        padding: 0 1;
+    }
+
+    #vault-env-list > ListItem.--highlight {
+        background: #330033;
+    }
+
+    #vault-hint {
+        text-align: center;
+        color: #666666;
+        padding-top: 1;
+    }
+
+    #vault-password-input {
+        margin: 1 0;
+        border: solid #ff00ff 50%;
+        background: #1a1a1a;
+        padding: 0 1;
+    }
+
+    #vault-input-label {
+        text-align: center;
+        color: #ff00ff;
+        padding-top: 1;
+    }
+    """
+
+    def __init__(self, vault: Vault, config_envs: list[str], *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.vault = vault
+        self.config_envs = config_envs
+        self._editing_env: Optional[str] = None
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="vault-container"):
+            yield Static("[bold #ff00ff]PASSWORD VAULT[/]", id="vault-title")
+            yield Static("", id="vault-status")
+            yield Static("[dim]──────────────────────────────────────────[/]", id="vault-separator")
+            yield ListView(id="vault-env-list")
+            yield Static("", id="vault-input-label")
+            yield Input(placeholder="enter password...", password=True, id="vault-password-input")
+            yield Static("", id="vault-hint")
+
+    def on_mount(self) -> None:
+        self._update_status()
+        self._populate_list()
+        pw_input = self.query_one("#vault-password-input", Input)
+        pw_input.display = False
+        input_label = self.query_one("#vault-input-label", Static)
+        input_label.display = False
+        vault_list = self.query_one("#vault-env-list", ListView)
+        vault_list.focus()
+        if self.config_envs:
+            self.call_later(lambda: setattr(vault_list, "index", 0))
+
+    def _update_status(self) -> None:
+        status = self.query_one("#vault-status", Static)
+        enabled = self.vault.is_enabled()
+        unlocked = self.vault.is_unlocked()
+        if enabled:
+            state = "[bold green]ENABLED[/]"
+            lock = " [dim]|[/] [green]unlocked[/]" if unlocked else " [dim]|[/] [red]locked[/]"
+        else:
+            state = "[bold red]DISABLED[/]"
+            lock = ""
+        status.update(f"  Status: {state}{lock}")
+        hint = self.query_one("#vault-hint", Static)
+        hint.update("[dim]e[/] toggle  [dim]Enter[/] set pw  [dim]d[/] delete  [dim]Esc[/] close")
+
+    def _populate_list(self) -> None:
+        vault_list = self.query_one("#vault-env-list", ListView)
+        vault_list.clear()
+        if not self.vault.is_unlocked():
+            return
+        env_map = self.vault.list_environments(self.config_envs)
+        for env, has_pw in env_map.items():
+            vault_list.append(VaultEnvListItem(env, has_pw))
+
+    def action_toggle_vault(self) -> None:
+        enabled = self.vault.is_enabled()
+        self.vault.set_enabled(not enabled)
+        self._update_status()
+
+    def action_delete_password(self) -> None:
+        if not self.vault.is_unlocked():
+            return
+        vault_list = self.query_one("#vault-env-list", ListView)
+        if vault_list.index is not None and vault_list.index < len(vault_list.children):
+            item = vault_list.children[vault_list.index]
+            if isinstance(item, VaultEnvListItem) and item.has_password:
+                self.vault.delete_password(item.env_name)
+                self._populate_list()
+                if vault_list.children:
+                    self.call_later(lambda: setattr(vault_list, "index", 0))
+
+    def on_list_view_selected(self, event: ListView.Selected) -> None:
+        if not self.vault.is_unlocked():
+            return
+        if isinstance(event.item, VaultEnvListItem):
+            self._editing_env = event.item.env_name
+            input_label = self.query_one("#vault-input-label", Static)
+            input_label.display = True
+            input_label.update(f"[bold #ff00ff]Password for[/] [bold]{event.item.env_name.replace('_', ' ')}[/]")
+            pw_input = self.query_one("#vault-password-input", Input)
+            pw_input.display = True
+            pw_input.value = ""
+            pw_input.focus()
+            hint = self.query_one("#vault-hint", Static)
+            hint.update("[dim]Enter[/] save  [dim]Esc[/] cancel")
+
+    @on(Input.Submitted, "#vault-password-input")
+    def on_password_submitted(self, event: Input.Submitted) -> None:
+        if self._editing_env and event.value:
+            self.vault.set_password(self._editing_env, event.value)
+        self._editing_env = None
+        pw_input = self.query_one("#vault-password-input", Input)
+        pw_input.display = False
+        pw_input.value = ""
+        input_label = self.query_one("#vault-input-label", Static)
+        input_label.display = False
+        self._populate_list()
+        self._update_status()
+        vault_list = self.query_one("#vault-env-list", ListView)
+        vault_list.focus()
+        if vault_list.children:
+            self.call_later(lambda: setattr(vault_list, "index", 0))
+
+    def action_cursor_down(self) -> None:
+        self.query_one("#vault-env-list", ListView).action_cursor_down()
+
+    def action_cursor_up(self) -> None:
+        self.query_one("#vault-env-list", ListView).action_cursor_up()
 
 
 class HostListItem(ListItem):
@@ -632,13 +866,24 @@ class ViperApp(App):
         background: rgba(0, 0, 0, 0.85);
     }
 
-    #help-box {
-        width: auto;
+    #help-container {
+        width: 40;
         height: auto;
-        min-width: 44;
-        padding: 1 2;
         background: #0d0d0d;
         border: heavy #ff0000;
+        padding: 1 2;
+    }
+
+    #help-title {
+        text-align: center;
+        text-style: bold;
+        color: #ff0000;
+        padding-bottom: 1;
+    }
+
+    #help-body {
+        width: auto;
+        height: auto;
     }
     """
 
@@ -652,6 +897,7 @@ class ViperApp(App):
         Binding("h", "help", "Help", show=False),
         Binding("t", "open_themes", "Themes"),
         Binding("r", "open_history", "Recent"),
+        Binding("v", "open_vault", "Vault"),
         Binding("s", "sftp", "SFTP", show=False),
         Binding("q", "quit", "Quit"),
         Binding("tab", "switch_panel", "Switch", show=False),
@@ -661,9 +907,10 @@ class ViperApp(App):
 
     TITLE = "VIPERSSH"
 
-    def __init__(self, config_dir: Optional[Path] = None) -> None:
+    def __init__(self, config_dir: Optional[Path] = None, vault: Optional[Vault] = None) -> None:
         super().__init__()
         self.config = Config(config_dir)
+        self.vault = vault or Vault()
         self.selected_env: Optional[str] = None
         self.current_hosts: list[HostInfo] = []
         self.filtered_hosts: list[HostInfo] = []
@@ -941,6 +1188,11 @@ class ViperApp(App):
                 self._connect(req.target, proto=req.proto)
         self.push_screen(HistoryScreen(), handle_history)
 
+    def action_open_vault(self) -> None:
+        """Open vault management screen."""
+        envs = self.config.environments
+        self.push_screen(VaultScreen(self.vault, envs))
+
     def action_sftp(self) -> None:
         """Connect to the selected host via SFTP."""
         left_list = self.query_one("#host-list-left", ListView)
@@ -1085,8 +1337,44 @@ class ViperApp(App):
 
     def _connect(self, target: str, proto: str = "ssh") -> None:
         """Connect to the specified target via SSH or SFTP."""
-        History().add(target, proto=proto)
-        self.exit(result=ConnectionRequest(target=target, proto=proto))
+        env_name = self._get_current_env()
+        History().add(target, proto=proto, env_name=env_name or "")
+        self.exit(result=ConnectionRequest(target=target, proto=proto, env_name=env_name))
+
+
+def _handle_post_connection(vault: Vault, env_name: Optional[str], returned_pw: str) -> None:
+    """Save vault password if expect.sh sent one back via pipe."""
+    if not vault.is_enabled() or not vault.is_unlocked() or not env_name:
+        return
+    if returned_pw:
+        vault.set_password(env_name, returned_pw)
+
+
+def _unlock_vault(vault: Vault) -> None:
+    """Unlock or create vault, prompting for master password as needed."""
+    master = vault.get_master_from_file()
+
+    if vault.vault_exists():
+        if master and vault.unlock(master):
+            return
+        # Prompt for master password
+        for _ in range(3):
+            master = getpass.getpass("\033[1;35m[VAULT]\033[0m Master password: ")
+            if vault.unlock(master):
+                return
+            print("\033[1;31m[VAULT]\033[0m Wrong master password.")
+        print("\033[1;31m[VAULT]\033[0m Vault locked — continuing without vault.")
+    else:
+        # Create new vault
+        print("\033[1;35m[VAULT]\033[0m Creating new vault.")
+        if not master:
+            master = getpass.getpass("Set master password: ")
+            confirm = getpass.getpass("Confirm master password: ")
+            if master != confirm:
+                print("\033[1;31m[VAULT]\033[0m Passwords don't match — vault not created.")
+                return
+        vault.create(master)
+        print("\033[1;32m[VAULT]\033[0m Vault created.")
 
 
 def main() -> None:
@@ -1097,32 +1385,107 @@ def main() -> None:
         type=Path,
         help="Path to config directory (default: ./etc)",
     )
+    parser.add_argument(
+        "--last",
+        action="store_true",
+        help="Reconnect to the most recent connection",
+    )
+    parser.add_argument(
+        "--show-last",
+        action="store_true",
+        help="Show the most recent connection and exit",
+    )
     args = parser.parse_args()
 
-    app = ViperApp(config_dir=args.config)
-    result = app.run()
+    # --show-last: just print and exit
+    if args.show_last:
+        history = History().load()
+        if not history:
+            print("No connection history.")
+        else:
+            entry = history[0]
+            proto = entry.get("proto", "ssh")
+            print(f"{entry['target']} ({proto})")
+        return
+
+    # --last: reconnect to most recent without launching TUI
+    if args.last:
+        history = History().load()
+        if not history:
+            print("No connection history.")
+            return
+        entry = history[0]
+        result = ConnectionRequest(
+            target=entry["target"],
+            proto=entry.get("proto", "ssh"),
+            env_name=entry.get("env"),
+        )
+    else:
+        result = None
+
+    vault = Vault()
+    if vault.is_enabled():
+        _unlock_vault(vault)
+
+    if result is None:
+        app = ViperApp(config_dir=args.config, vault=vault)
+        result = app.run()
 
     if not result:
         return
 
+    # If vault was enabled during the TUI session, unlock/create it now
+    if vault.is_enabled() and not vault.is_unlocked():
+        _unlock_vault(vault)
+
     target = result.target
     proto = result.proto
+    env_name = result.env_name
 
-    script_dir = Path(__file__).parent.resolve()
+    script_dir = Path(__file__).resolve().parent
     expect_script = script_dir / "expect.sh"
+    use_expect = expect_script.exists()
 
     mode_label = " via \033[1;33mSFTP\033[0m" if proto == "sftp" else ""
     print(f"\n\033[1;32m[VIPERSSH]\033[0m Connecting to \033[1;36m{target}\033[0m{mode_label}\n")
 
-    if expect_script.exists():
-        os.execvp(str(expect_script), [str(expect_script), target, proto])
+    run_env = os.environ.copy()
+    returned_pw = ""
+    pw_read_fd = pw_write_fd = -1
+
+    if use_expect:
+        # Set vault password in environment if available
+        if vault.is_enabled() and vault.is_unlocked() and env_name:
+            pw = vault.get_password(env_name)
+            if pw:
+                run_env["VIPER_PASSWORD"] = pw
+
+        # Create pipe for expect.sh to send back the working password
+        pw_read_fd, pw_write_fd = os.pipe()
+        run_env["VIPER_PW_FD"] = str(pw_write_fd)
+
+    prev_sigint = signal.signal(signal.SIGINT, signal.SIG_IGN)
+
+    if use_expect:
+        ret = subprocess.call(
+            [str(expect_script), target, proto],
+            env=run_env, pass_fds=(pw_write_fd,),
+        )
+        # Close write end and read the password back from the pipe
+        os.close(pw_write_fd)
+        with os.fdopen(pw_read_fd, "r") as f:
+            returned_pw = f.read()
     elif proto == "sftp":
-        signal.signal(signal.SIGINT, signal.SIG_IGN)
         ret = subprocess.call(["sftp", target])
-        subprocess.call(["stty", "sane"], stderr=subprocess.DEVNULL)
-        sys.exit(ret)
     else:
-        os.execvp("ssh", ["ssh", target])
+        ret = subprocess.call(["ssh", target])
+
+    signal.signal(signal.SIGINT, prev_sigint)
+
+    if use_expect:
+        subprocess.call(["stty", "sane"], stderr=subprocess.DEVNULL)
+
+    _handle_post_connection(vault, env_name, returned_pw)
 
 
 if __name__ == "__main__":
