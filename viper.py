@@ -710,8 +710,10 @@ class FavSectionItem(ListItem):
         self.disabled = True
 
     def compose(self) -> ComposeResult:
-        line = "\u2500" * 30
-        yield Label(f"[bold yellow]{self.env_display}[/] [dim]{line}[/]", classes="section-label")
+        yield Label(
+            f"[dim]──[/] [bold green]{self.env_display}[/] [dim]{'─' * max(1, 32 - len(self.env_display))}[/]",
+            classes="section-label",
+        )
 
     def watch_highlighted(self, highlighted: bool) -> None:
         pass
@@ -725,7 +727,7 @@ class FavHostListItem(HostListItem):
         self.env_name = env_name
 
     def compose(self) -> ComposeResult:
-        yield Label(f"  {self.display_name}", classes="item-label")
+        yield Label(f"    {self.display_name}", classes="item-label")
 
     def watch_highlighted(self, highlighted: bool) -> None:
         try:
@@ -733,9 +735,9 @@ class FavHostListItem(HostListItem):
         except Exception:
             return
         if highlighted:
-            label.update(f"[bold red]> {self.display_name}[/]")
+            label.update(f"  [bold red]> {self.display_name}[/]")
         else:
-            label.update(f"  {self.display_name}")
+            label.update(f"    {self.display_name}")
 
 
 class EnvListItem(ListItem):
@@ -1056,7 +1058,8 @@ class ViperApp(App):
         self._fav_env_map.clear()
 
         if environment == "__favorites__":
-            fav_entries = sorted(self.favorites.load(), key=lambda e: e.get("env_name", ""))
+            env_order = {e: i for i, e in enumerate(self.config.environments)}
+            fav_entries = sorted(self.favorites.load(), key=lambda e: env_order.get(e.get("env_name", ""), len(env_order)))
             self.current_hosts = []
             for entry in fav_entries:
                 self.current_hosts.append(HostInfo(entry["display_name"], entry["target"], entry.get("is_alias", False)))
@@ -1121,7 +1124,8 @@ class ViperApp(App):
             self._fav_env_map.clear()
 
             if env_name == "__favorites__":
-                fav_entries = sorted(self.favorites.load(), key=lambda e: e.get("env_name", ""))
+                env_order = {e: i for i, e in enumerate(self.config.environments)}
+                fav_entries = sorted(self.favorites.load(), key=lambda e: env_order.get(e.get("env_name", ""), len(env_order)))
                 hosts = []
                 for entry in fav_entries:
                     hosts.append(HostInfo(entry["display_name"], entry["target"], entry.get("is_alias", False)))
@@ -1369,7 +1373,13 @@ class ViperApp(App):
             host_list = self.query_one(list_id, ListView)
             host_list.index = None
             for item in host_list.children:
-                if isinstance(item, HostListItem):
+                if isinstance(item, FavHostListItem):
+                    try:
+                        label = item.query_one(".item-label")
+                        label.update(f"    {item.display_name}")
+                    except Exception:
+                        pass
+                elif isinstance(item, HostListItem):
                     try:
                         label = item.query_one(".item-label")
                         label.update(f"  {item.display_name}")
