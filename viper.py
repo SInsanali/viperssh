@@ -320,11 +320,12 @@ def _relative_time(ts: float) -> str:
 class HistoryListItem(ListItem):
     """A list item representing a history entry."""
 
-    def __init__(self, target: str, ts: float, proto: str = "ssh", *args, **kwargs) -> None:
+    def __init__(self, target: str, ts: float, proto: str = "ssh", env_name: str = "", *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.target = target
         self.ts = ts
         self.proto = proto
+        self.env_name = env_name
 
     def _label_text(self, highlighted: bool = False) -> str:
         rel = _relative_time(self.ts)
@@ -441,12 +442,12 @@ class HistoryScreen(ModalScreen):
         if ssh_entries:
             history_list.append(HistorySectionItem("SSH", "#00ff00"))
             for entry in ssh_entries:
-                history_list.append(HistoryListItem(entry["target"], entry["ts"], "ssh"))
+                history_list.append(HistoryListItem(entry["target"], entry["ts"], "ssh", entry.get("env", "")))
 
         if sftp_entries:
             history_list.append(HistorySectionItem("SFTP", "#00bfff"))
             for entry in sftp_entries:
-                history_list.append(HistoryListItem(entry["target"], entry["ts"], "sftp"))
+                history_list.append(HistoryListItem(entry["target"], entry["ts"], "sftp", entry.get("env", "")))
 
         history_list.focus()
         # Skip the section header at index 0 to focus the first selectable item
@@ -454,7 +455,7 @@ class HistoryScreen(ModalScreen):
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         if isinstance(event.item, HistoryListItem):
-            self.dismiss(ConnectionRequest(event.item.target, event.item.proto))
+            self.dismiss(ConnectionRequest(event.item.target, event.item.proto, event.item.env_name or None))
 
     def action_cursor_down(self) -> None:
         self.query_one("#history-list", ListView).action_cursor_down()
@@ -1283,7 +1284,7 @@ class ViperApp(App):
         """Open recent connections screen."""
         def handle_history(req: Optional[ConnectionRequest]) -> None:
             if req:
-                self._connect(req.target, proto=req.proto)
+                self._connect(req.target, proto=req.proto, env_name_override=req.env_name)
         self.push_screen(HistoryScreen(), handle_history)
 
     def action_open_vault(self) -> None:
@@ -1498,6 +1499,9 @@ class ViperApp(App):
     def _connect(self, target: str, proto: str = "ssh", env_name_override: Optional[str] = None) -> None:
         """Connect to the specified target via SSH or SFTP."""
         env_name = env_name_override or self._get_current_env()
+        # Never pass the pseudo-environment to vault/history
+        if env_name == "__favorites__":
+            env_name = None
         History().add(target, proto=proto, env_name=env_name or "")
         self.exit(result=ConnectionRequest(target=target, proto=proto, env_name=env_name))
 
