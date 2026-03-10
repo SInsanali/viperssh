@@ -1611,6 +1611,8 @@ def main() -> None:
     use_expect = expect_script.exists()
 
     mode_label = " via \033[1;33mSFTP\033[0m" if proto == "sftp" else ""
+    sys.stdout.write(f"\033]0;{target}\007")
+    sys.stdout.flush()
     print(f"\n\033[1;32m[VIPERSSH]\033[0m Connecting to \033[1;36m{target}\033[0m{mode_label}\n")
 
     run_env = os.environ.copy()
@@ -1645,6 +1647,8 @@ def main() -> None:
         ret = subprocess.call(["ssh", target])
 
     signal.signal(signal.SIGINT, prev_sigint)
+    sys.stdout.write("\033]0;\007")
+    sys.stdout.flush()
 
     if use_expect:
         subprocess.call(["stty", "sane"], stderr=subprocess.DEVNULL)

@@ -205,6 +205,11 @@ if {[info exists env(VIPER_PW_FD)] && $cached_password ne ""} {
 # Clear password from memory before interactive mode
 set cached_password ""
 
-interact
+puts "\033]0;$dest\007"
+interact {
+    -timeout 180 {
+        send " \b"
+    }
+}
 
 exit $viper_exit
