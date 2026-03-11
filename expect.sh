@@ -100,7 +100,7 @@ expect {
         puts "\n\[VIPERSSH\] Password change required. Complete it manually.\n"
         send_user $expect_out(0,string)
         interact {
-            -timeout 180 {
+            -timeout 60 {
                 send " \b"
             }
         }
@@ -207,7 +207,7 @@ set cached_password ""
 
 puts "\033]0;$dest\007"
 interact {
-    -timeout 180 {
+    -timeout 60 {
         send " \b"
     }
 }

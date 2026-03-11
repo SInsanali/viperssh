@@ -40,13 +40,13 @@ THEMES = {
         "host_color": "#ff0000",
         "accent": "#ff00ff",
     },
-    "ocean": {
-        "name": "Ocean",
-        "bg": "#0a1628",
-        "panel_bg": "#0d1e36",
-        "env_color": "#00bfff",
-        "host_color": "#7fffd4",
-        "accent": "#ff6b9d",
+    "cyberpunk": {
+        "name": "Cyberpunk",
+        "bg": "#0a0a12",
+        "panel_bg": "#12121f",
+        "env_color": "#0ff0fc",
+        "host_color": "#ff2a6d",
+        "accent": "#d1f700",
     },
     "sunset": {
         "name": "Sunset",
@@ -64,13 +64,13 @@ THEMES = {
         "host_color": "#00dd00",
         "accent": "#00ff00",
     },
-    "frost": {
-        "name": "Frost",
-        "bg": "#0a1a2a",
-        "panel_bg": "#102030",
-        "env_color": "#88ccff",
-        "host_color": "#aaddff",
-        "accent": "#ff88cc",
+    "blaze": {
+        "name": "Blaze",
+        "bg": "#120c08",
+        "panel_bg": "#1e1410",
+        "env_color": "#ff6b6b",
+        "host_color": "#bf5af2",
+        "accent": "#fbbf24",
     },
     # VS Code inspired themes
     "dracula": {
@@ -97,13 +97,13 @@ THEMES = {
         "host_color": "#f92672",
         "accent": "#e6db74",
     },
-    "nord": {
-        "name": "Nord",
-        "bg": "#2e3440",
-        "panel_bg": "#3b4252",
-        "env_color": "#a3be8c",
-        "host_color": "#bf616a",
-        "accent": "#88c0d0",
+    "ember": {
+        "name": "Ember",
+        "bg": "#1a0e0a",
+        "panel_bg": "#261612",
+        "env_color": "#ff9f43",
+        "host_color": "#ee5a24",
+        "accent": "#ffd32a",
     },
     "gruvbox": {
         "name": "Gruvbox",
@@ -113,67 +113,75 @@ THEMES = {
         "host_color": "#fb4934",
         "accent": "#fabd2f",
     },
-    "solarized": {
-        "name": "Solarized Dark",
-        "bg": "#002b36",
-        "panel_bg": "#073642",
-        "env_color": "#859900",
-        "host_color": "#dc322f",
-        "accent": "#268bd2",
+    "aurora": {
+        "name": "Aurora",
+        "bg": "#070e1a",
+        "panel_bg": "#0e1a2b",
+        "env_color": "#45ffbc",
+        "host_color": "#c850c0",
+        "accent": "#4facfe",
     },
-    "tokyonight": {
-        "name": "Tokyo Night",
-        "bg": "#1a1b26",
-        "panel_bg": "#24283b",
-        "env_color": "#9ece6a",
-        "host_color": "#f7768e",
-        "accent": "#7aa2f7",
+    "midnight": {
+        "name": "Midnight",
+        "bg": "#0d0f18",
+        "panel_bg": "#151929",
+        "env_color": "#82aaff",
+        "host_color": "#c792ea",
+        "accent": "#89ddff",
     },
-    "catppuccin": {
-        "name": "Catppuccin",
-        "bg": "#1e1e2e",
-        "panel_bg": "#313244",
-        "env_color": "#a6e3a1",
-        "host_color": "#f38ba8",
-        "accent": "#cba6f7",
+    "jade": {
+        "name": "Jade",
+        "bg": "#0a120e",
+        "panel_bg": "#12201a",
+        "env_color": "#36d399",
+        "host_color": "#fbbd23",
+        "accent": "#66cc8a",
     },
 }
 
 THEME_CONFIG_FILE = Path(__file__).resolve().parent / ".viper_theme"
 
-# ASCII Art Banner
-VIPER_BANNER = """
-[bold green]██╗   ██╗██╗██████╗ ███████╗██████╗ [/][bold red]███████╗███████╗██╗  ██╗[/]
-[bold green]██║   ██║██║██╔══██╗██╔════╝██╔══██╗[/][bold red]██╔════╝██╔════╝██║  ██║[/]
-[bold green]██║   ██║██║██████╔╝█████╗  ██████╔╝[/][bold red]███████╗███████╗███████║[/]
-[bold green]╚██╗ ██╔╝██║██╔═══╝ ██╔══╝  ██╔══██╗[/][bold red]╚════██║╚════██║██╔══██║[/]
-[bold green] ╚████╔╝ ██║██║     ███████╗██║  ██║[/][bold red]███████║███████║██║  ██║[/]
-[bold green]  ╚═══╝  ╚═╝╚═╝     ╚══════╝╚═╝  ╚═╝[/][bold red]╚══════╝╚══════╝╚═╝  ╚═╝[/]
-[dim green]═══════════════════════════════════════════════════════════════[/]"""
 
-# Help menu content
-HELP_TEXT = """[bold red]  NAVIGATION[/]
-[dim]  ──────────────────────────────[/]
-  [bold red]↑ ↓[/]  [dim]or[/]  [bold red]j k[/]   Move up/down
-  [bold red]→[/]  [dim]or[/]  [bold red]Enter[/]  Select / Enter
-  [bold red]←[/]  [dim]or[/]  [bold red]Esc[/]    Go back
-  [bold red]Tab[/]           Switch panels
+def _get_theme(app=None) -> dict:
+    """Get the active theme dict. Falls back to viper if no app context."""
+    theme_id = getattr(app, "_active_theme", "viper") if app else "viper"
+    return THEMES.get(theme_id, THEMES["viper"])
 
-[bold green]  SEARCH[/]
-[dim]  ──────────────────────────────[/]
-  [bold red]/[/]             Focus search box
-  [bold red]Esc[/]           Exit search
-  [bold red]Enter[/]         Jump to results
 
-[bold #ff00ff]  ACTIONS[/]
+def _make_banner(env_color: str, host_color: str) -> str:
+    return f"""
+[bold {env_color}]██╗   ██╗██╗██████╗ ███████╗██████╗ [/][bold {host_color}]███████╗███████╗██╗  ██╗[/]
+[bold {env_color}]██║   ██║██║██╔══██╗██╔════╝██╔══██╗[/][bold {host_color}]██╔════╝██╔════╝██║  ██║[/]
+[bold {env_color}]██║   ██║██║██████╔╝█████╗  ██████╔╝[/][bold {host_color}]███████╗███████╗███████║[/]
+[bold {env_color}]╚██╗ ██╔╝██║██╔═══╝ ██╔══╝  ██╔══██╗[/][bold {host_color}]╚════██║╚════██║██╔══██║[/]
+[bold {env_color}] ╚████╔╝ ██║██║     ███████╗██║  ██║[/][bold {host_color}]███████║███████║██║  ██║[/]
+[bold {env_color}]  ╚═══╝  ╚═╝╚═╝     ╚══════╝╚═╝  ╚═╝[/][bold {host_color}]╚══════╝╚══════╝╚═╝  ╚═╝[/]
+[dim {env_color}]═══════════════════════════════════════════════════════════════[/]"""
+
+
+def _make_help_text(host_color: str, env_color: str, accent: str) -> str:
+    return f"""[bold {host_color}]  NAVIGATION[/]
 [dim]  ──────────────────────────────[/]
-  [bold red]?[/]  [dim]or[/]  [bold red]h[/]      Toggle this menu
-  [bold red]t[/]             Theme selector
-  [bold red]r[/]             Recent connections
-  [bold red]v[/]             Password vault
-  [bold red]f[/]             Toggle favorite
-  [bold red]s[/]             SFTP connect
-  [bold red]q[/]             Quit
+  [bold {host_color}]↑ ↓[/]  [dim]or[/]  [bold {host_color}]j k[/]   Move up/down
+  [bold {host_color}]→[/]  [dim]or[/]  [bold {host_color}]Enter[/]  Select / Enter
+  [bold {host_color}]←[/]  [dim]or[/]  [bold {host_color}]Esc[/]    Go back
+  [bold {host_color}]Tab[/]           Switch panels
+
+[bold {env_color}]  SEARCH[/]
+[dim]  ──────────────────────────────[/]
+  [bold {host_color}]/[/]             Focus search box
+  [bold {host_color}]Esc[/]           Exit search
+  [bold {host_color}]Enter[/]         Jump to results
+
+[bold {accent}]  ACTIONS[/]
+[dim]  ──────────────────────────────[/]
+  [bold {host_color}]?[/]  [dim]or[/]  [bold {host_color}]h[/]      Toggle this menu
+  [bold {host_color}]t[/]             Theme selector
+  [bold {host_color}]r[/]             Recent connections
+  [bold {host_color}]v[/]             Password vault
+  [bold {host_color}]f[/]             Toggle favorite
+  [bold {host_color}]s[/]             SFTP connect
+  [bold {host_color}]q[/]             Quit
 [dim]──────────────────────────────────[/]
 [dim]       Press any key to close[/]"""
 
@@ -188,9 +196,10 @@ class HelpScreen(ModalScreen):
     ]
 
     def compose(self) -> ComposeResult:
+        theme = _get_theme(self.app)
         with Vertical(id="help-container"):
-            yield Static("[bold red]QUICK MENU[/]", id="help-title")
-            yield Static(HELP_TEXT, id="help-body")
+            yield Static(f"[bold {theme['host_color']}]QUICK MENU[/]", id="help-title")
+            yield Static(_make_help_text(theme["host_color"], theme["env_color"], theme["accent"]), id="help-body")
 
     def on_key(self, event) -> None:
         self.dismiss()
@@ -209,7 +218,8 @@ class ThemeListItem(ListItem):
         self.is_active = is_active
 
     def compose(self) -> ComposeResult:
-        marker = "[bold green]●[/]" if self.is_active else "[dim]○[/]"
+        theme = _get_theme(self.app)
+        marker = f"[bold {theme['env_color']}]●[/]" if self.is_active else "[dim]○[/]"
         yield Label(f"  {marker} {self.theme_name}", classes="theme-label")
 
     def watch_highlighted(self, highlighted: bool) -> None:
@@ -217,9 +227,10 @@ class ThemeListItem(ListItem):
             label = self.query_one(".theme-label")
         except Exception:
             return
-        marker = "[bold green]●[/]" if self.is_active else "[dim]○[/]"
+        theme = _get_theme(self.app)
+        marker = f"[bold {theme['env_color']}]●[/]" if self.is_active else "[dim]○[/]"
         if highlighted:
-            label.update(f"[bold red]>[/] {marker} [bold]{self.theme_name}[/]")
+            label.update(f"[bold {theme['host_color']}]>[/] {marker} [bold]{self.theme_name}[/]")
         else:
             label.update(f"  {marker} {self.theme_name}")
 
@@ -244,15 +255,15 @@ class ThemeScreen(ModalScreen):
     #theme-container {
         width: 50;
         height: auto;
-        background: #0d0d0d;
-        border: heavy #ff0000;
+        background: $surface;
+        border: heavy $error;
         padding: 1 2;
     }
 
     #theme-title {
         text-align: center;
         text-style: bold;
-        color: #ff0000;
+        color: $error;
         padding-bottom: 1;
     }
 
@@ -266,7 +277,7 @@ class ThemeScreen(ModalScreen):
     }
 
     #theme-list > ListItem.--highlight {
-        background: #330000;
+        background: $error-darken-3;
     }
 
     #theme-hint {
@@ -277,8 +288,9 @@ class ThemeScreen(ModalScreen):
     """
 
     def compose(self) -> ComposeResult:
+        theme = _get_theme(self.app)
         with Vertical(id="theme-container"):
-            yield Static("[bold red]SELECT THEME[/]", id="theme-title")
+            yield Static(f"[bold {theme['host_color']}]SELECT THEME[/]", id="theme-title")
             yield ListView(id="theme-list")
             yield Static("[dim]Enter[/] apply  [dim]Esc[/] close", id="theme-hint")
 
@@ -328,11 +340,12 @@ class HistoryListItem(ListItem):
         self.env_name = env_name
 
     def _label_text(self, highlighted: bool = False) -> str:
+        theme = _get_theme(self.app)
         rel = _relative_time(self.ts)
-        proto_tag = f" [dim cyan][{self.proto}][/]" if self.proto != "ssh" else ""
+        proto_tag = f" [dim {theme['accent']}][{self.proto}][/]" if self.proto != "ssh" else ""
         if highlighted:
-            return f"[bold red]>[/] {self.target}{proto_tag}  [dim yellow]{rel}[/]"
-        return f"  {self.target}{proto_tag}  [dim yellow]{rel}[/]"
+            return f"[bold {theme['host_color']}]>[/] {self.target}{proto_tag}  [dim {theme['accent']}]{rel}[/]"
+        return f"  {self.target}{proto_tag}  [dim {theme['accent']}]{rel}[/]"
 
     def compose(self) -> ComposeResult:
         yield Label(self._label_text(), classes="history-label")
@@ -382,15 +395,15 @@ class HistoryScreen(ModalScreen):
     #history-container {
         width: 50;
         height: auto;
-        background: #0d0d0d;
-        border: heavy #ff00ff;
+        background: $surface;
+        border: heavy $accent;
         padding: 1 2;
     }
 
     #history-title {
         text-align: center;
         text-style: bold;
-        color: #ff00ff;
+        color: $accent;
         padding-bottom: 1;
     }
 
@@ -404,7 +417,7 @@ class HistoryScreen(ModalScreen):
     }
 
     #history-list > ListItem.--highlight {
-        background: #330033;
+        background: $accent-darken-3;
     }
 
     #history-empty {
@@ -421,8 +434,9 @@ class HistoryScreen(ModalScreen):
     """
 
     def compose(self) -> ComposeResult:
+        theme = _get_theme(self.app)
         with Vertical(id="history-container"):
-            yield Static("[bold #ff00ff]RECENT CONNECTIONS[/]", id="history-title")
+            yield Static(f"[bold {theme['accent']}]RECENT CONNECTIONS[/]", id="history-title")
             yield ListView(id="history-list")
             yield Static("", id="history-empty")
             yield Static("[dim]Enter[/] connect  [dim]Esc[/] close", id="history-hint")
@@ -439,13 +453,14 @@ class HistoryScreen(ModalScreen):
         ssh_entries = [e for e in history if e.get("proto", "ssh") == "ssh"]
         sftp_entries = [e for e in history if e.get("proto") == "sftp"]
 
+        theme = _get_theme(self.app)
         if ssh_entries:
-            history_list.append(HistorySectionItem("SSH", "#00ff00"))
+            history_list.append(HistorySectionItem("SSH", theme["env_color"]))
             for entry in ssh_entries:
                 history_list.append(HistoryListItem(entry["target"], entry["ts"], "ssh", entry.get("env", "")))
 
         if sftp_entries:
-            history_list.append(HistorySectionItem("SFTP", "#00bfff"))
+            history_list.append(HistorySectionItem("SFTP", theme["accent"]))
             for entry in sftp_entries:
                 history_list.append(HistoryListItem(entry["target"], entry["ts"], "sftp", entry.get("env", "")))
 
@@ -473,15 +488,16 @@ class VaultEnvListItem(ListItem):
         self.has_password = has_password
 
     def _label_text(self, highlighted: bool = False) -> str:
+        theme = _get_theme(self.app)
         if self.has_password:
-            marker = "[bold green]●[/]"
-            tag = " [dim green]saved[/]"
+            marker = f"[bold {theme['env_color']}]●[/]"
+            tag = f" [dim {theme['env_color']}]saved[/]"
         else:
-            marker = "[dim red]○[/]"
-            tag = " [dim red]no pw[/]"
+            marker = f"[dim {theme['host_color']}]○[/]"
+            tag = f" [dim {theme['host_color']}]no pw[/]"
         name = self.env_name.replace("_", " ")
         if highlighted:
-            return f"[bold red]>[/] {marker} [bold]{name}[/]{tag}"
+            return f"[bold {theme['host_color']}]>[/] {marker} [bold]{name}[/]{tag}"
         return f"  {marker} {name}{tag}"
 
     def compose(self) -> ComposeResult:
@@ -517,15 +533,15 @@ class VaultScreen(ModalScreen):
     #vault-container {
         width: 50;
         height: auto;
-        background: #0d0d0d;
-        border: heavy #ff00ff;
+        background: $surface;
+        border: heavy $accent;
         padding: 1 2;
     }
 
     #vault-title {
         text-align: center;
         text-style: bold;
-        color: #ff00ff;
+        color: $accent;
         padding-bottom: 1;
     }
 
@@ -549,7 +565,7 @@ class VaultScreen(ModalScreen):
     }
 
     #vault-env-list > ListItem.--highlight {
-        background: #330033;
+        background: $accent-darken-3;
     }
 
     #vault-hint {
@@ -560,14 +576,14 @@ class VaultScreen(ModalScreen):
 
     #vault-password-input {
         margin: 1 0;
-        border: solid #ff00ff 50%;
-        background: #1a1a1a;
+        border: solid $accent 50%;
+        background: $background;
         padding: 0 1;
     }
 
     #vault-input-label {
         text-align: center;
-        color: #ff00ff;
+        color: $accent;
         padding-top: 1;
     }
     """
@@ -579,8 +595,9 @@ class VaultScreen(ModalScreen):
         self._editing_env: Optional[str] = None
 
     def compose(self) -> ComposeResult:
+        theme = _get_theme(self.app)
         with Vertical(id="vault-container"):
-            yield Static("[bold #ff00ff]PASSWORD VAULT[/]", id="vault-title")
+            yield Static(f"[bold {theme['accent']}]PASSWORD VAULT[/]", id="vault-title")
             yield Static("", id="vault-status")
             yield Static("[dim]──────────────────────────────────────────[/]", id="vault-separator")
             yield ListView(id="vault-env-list")
@@ -601,14 +618,15 @@ class VaultScreen(ModalScreen):
             self.call_later(lambda: setattr(vault_list, "index", 0))
 
     def _update_status(self) -> None:
+        theme = _get_theme(self.app)
         status = self.query_one("#vault-status", Static)
         enabled = self.vault.is_enabled()
         unlocked = self.vault.is_unlocked()
         if enabled:
-            state = "[bold green]ENABLED[/]"
-            lock = " [dim]|[/] [green]unlocked[/]" if unlocked else " [dim]|[/] [red]locked[/]"
+            state = f"[bold {theme['env_color']}]ENABLED[/]"
+            lock = f" [dim]|[/] [{theme['env_color']}]unlocked[/]" if unlocked else f" [dim]|[/] [{theme['host_color']}]locked[/]"
         else:
-            state = "[bold red]DISABLED[/]"
+            state = f"[bold {theme['host_color']}]DISABLED[/]"
             lock = ""
         status.update(f"  Status: {state}{lock}")
         hint = self.query_one("#vault-hint", Static)
@@ -647,7 +665,8 @@ class VaultScreen(ModalScreen):
             self._editing_env = event.item.env_name
             input_label = self.query_one("#vault-input-label", Static)
             input_label.display = True
-            input_label.update(f"[bold #ff00ff]Password for[/] [bold]{event.item.env_name.replace('_', ' ')}[/]")
+            theme = _get_theme(self.app)
+            input_label.update(f"[bold {theme['accent']}]Password for[/] [bold]{event.item.env_name.replace('_', ' ')}[/]")
             pw_input = self.query_one("#vault-password-input", Input)
             pw_input.display = True
             pw_input.value = ""
@@ -696,8 +715,9 @@ class HostListItem(ListItem):
             label = self.query_one(".item-label")
         except Exception:
             return
+        theme = _get_theme(self.app)
         if highlighted:
-            label.update(f"[bold red]> {self.display_name}[/]")
+            label.update(f"[bold {theme['host_color']}]> {self.display_name}[/]")
         else:
             label.update(f"  {self.display_name}")
 
@@ -711,8 +731,9 @@ class FavSectionItem(ListItem):
         self.disabled = True
 
     def compose(self) -> ComposeResult:
+        theme = _get_theme(self.app)
         yield Label(
-            f"[dim]──[/] [bold green]{self.env_display}[/] [dim]{'─' * max(1, 32 - len(self.env_display))}[/]",
+            f"[dim]──[/] [bold {theme['env_color']}]{self.env_display}[/] [dim]{'─' * max(1, 32 - len(self.env_display))}[/]",
             classes="section-label",
         )
 
@@ -735,8 +756,9 @@ class FavHostListItem(HostListItem):
             label = self.query_one(".item-label")
         except Exception:
             return
+        theme = _get_theme(self.app)
         if highlighted:
-            label.update(f"  [bold red]> {self.display_name}[/]")
+            label.update(f"  [bold {theme['host_color']}]> {self.display_name}[/]")
         else:
             label.update(f"    {self.display_name}")
 
@@ -751,17 +773,19 @@ class EnvListItem(ListItem):
         self.host_count = host_count
 
     def compose(self) -> ComposeResult:
-        yield Label(f"  {self.display_name:<20} [dim red]({self.host_count})[/]", classes="item-label")
+        theme = _get_theme(self.app)
+        yield Label(f"  {self.display_name:<20} [dim {theme['host_color']}]({self.host_count})[/]", classes="item-label")
 
     def watch_highlighted(self, highlighted: bool) -> None:
         try:
             label = self.query_one(".item-label")
         except Exception:
             return
+        theme = _get_theme(self.app)
         if highlighted:
-            label.update(f"[bold green]> {self.display_name:<20}[/] [red]({self.host_count})[/]")
+            label.update(f"[bold {theme['env_color']}]> {self.display_name:<20}[/] [{theme['host_color']}]({self.host_count})[/]")
         else:
-            label.update(f"  {self.display_name:<20} [dim red]({self.host_count})[/]")
+            label.update(f"  {self.display_name:<20} [dim {theme['host_color']}]({self.host_count})[/]")
 
 
 class ViperApp(App):
@@ -771,8 +795,8 @@ class ViperApp(App):
 
     CSS = """
     Screen {
-        background: #0a0a0a;
         layout: vertical;
+        background: $background;
     }
 
     #banner {
@@ -789,36 +813,36 @@ class ViperApp(App):
     }
 
     #env-panel {
-        border: heavy #00ff00;
-        background: #0d0d0d;
+        border: heavy $success;
+        background: $surface;
         padding: 0 1;
         width: 1fr;
-        border-title-color: #00ff00;
+        border-title-color: $success;
         border-title-style: bold;
     }
 
     #host-panel {
-        border: heavy #ff0000;
-        background: #0d0d0d;
+        border: heavy $error;
+        background: $surface;
         padding: 0 1;
         width: 2fr;
-        border-title-color: #ff0000;
+        border-title-color: $error;
         border-title-style: bold;
     }
 
     #env-list {
         height: 1fr;
         background: transparent;
-        scrollbar-color: #00ff00;
-        scrollbar-color-hover: #00ff00;
-        scrollbar-color-active: #00ff00;
+        scrollbar-color: $success;
+        scrollbar-color-hover: $success;
+        scrollbar-color-active: $success;
     }
 
     #env-filter-box {
         dock: top;
         margin: 1 0;
-        border: solid #00ff00 50%;
-        background: #1a1a1a;
+        border: solid $success 50%;
+        background: $background;
         padding: 0 1;
         height: 3;
     }
@@ -826,13 +850,13 @@ class ViperApp(App):
     #search-box {
         dock: top;
         margin: 1 0;
-        border: solid #ff0000 50%;
-        background: #1a1a1a;
+        border: solid $error 50%;
+        background: $background;
         padding: 0 1;
     }
 
     #search-box:focus {
-        border: solid #ff0000;
+        border: solid $error;
     }
 
     #search-box > .input--placeholder {
@@ -843,7 +867,7 @@ class ViperApp(App):
         dock: bottom;
         height: 3;
         padding: 1;
-        background: #1a1a1a;
+        background: $surface;
     }
 
     ListView {
@@ -857,12 +881,11 @@ class ViperApp(App):
     }
 
     ListView > ListItem:hover {
-        background: #1a1a1a;
+        background: $surface;
     }
 
-    /* Environment list highlighting */
     #env-list > ListItem.--highlight {
-        background: #003300;
+        background: $success-darken-3;
     }
 
     /* Host columns layout */
@@ -874,28 +897,27 @@ class ViperApp(App):
         width: 1fr;
         height: 1fr;
         background: transparent;
-        scrollbar-color: #ff0000;
+        scrollbar-color: $error;
     }
 
-    /* Host list highlighting */
     #host-list-left > ListItem.--highlight,
     #host-list-right > ListItem.--highlight {
-        background: #330000;
+        background: $error-darken-3;
     }
 
     #target-display {
         text-style: bold;
-        color: #ff00ff;
+        color: $accent;
     }
 
     Footer {
-        background: #1a1a1a;
-        color: #00ff00;
+        background: $surface;
+        color: $success;
     }
 
     Footer > .footer--key {
-        background: #002200;
-        color: #00ff00;
+        background: $success-darken-3;
+        color: $success;
     }
 
     Footer > .footer--description {
@@ -911,15 +933,15 @@ class ViperApp(App):
     #help-container {
         width: 40;
         height: auto;
-        background: #0d0d0d;
-        border: heavy #ff0000;
+        background: $surface;
+        border: heavy $error;
         padding: 1 2;
     }
 
     #help-title {
         text-align: center;
         text-style: bold;
-        color: #ff0000;
+        color: $error;
         padding-bottom: 1;
     }
 
@@ -951,6 +973,7 @@ class ViperApp(App):
     TITLE = "VIPERSSH"
 
     def __init__(self, config_dir: Optional[Path] = None, vault: Optional[Vault] = None) -> None:
+        self._active_theme = self._load_theme()
         super().__init__()
         self.config = Config(config_dir)
         self.vault = vault or Vault()
@@ -959,7 +982,6 @@ class ViperApp(App):
         self.selected_env: Optional[str] = None
         self.current_hosts: list[HostInfo] = []
         self.filtered_hosts: list[HostInfo] = []
-        self._active_theme = self._load_theme()
         self._saved_env_index: int = 0  # Track env position for search restore
 
     def _load_theme(self) -> str:
@@ -978,7 +1000,18 @@ class ViperApp(App):
         except OSError:
             pass
 
-    def action_set_theme(self, theme_id: str) -> None:
+    def get_css_variables(self) -> dict[str, str]:
+        """Map theme colors to Textual CSS variables."""
+        variables = super().get_css_variables()
+        theme = THEMES.get(self._active_theme, THEMES["viper"])
+        variables["background"] = theme["bg"]
+        variables["surface"] = theme["panel_bg"]
+        variables["success"] = theme["env_color"]
+        variables["error"] = theme["host_color"]
+        variables["accent"] = theme["accent"]
+        return variables
+
+    def action_set_theme(self, theme_id: str, notify: bool = True) -> None:
         """Switch to a different theme."""
         if theme_id not in THEMES:
             return
@@ -987,25 +1020,20 @@ class ViperApp(App):
         self._active_theme = theme_id
         self._save_theme(theme_id)
 
-        # Apply theme colors dynamically
-        self.styles.background = theme["bg"]
+        # Re-apply CSS variables and refresh all styles
+        self.call_later(self.refresh_css)
 
-        # Update panel colors
-        env_panel = self.query_one("#env-panel")
-        host_panel = self.query_one("#host-panel")
+        # Update banner with new colors
+        self.query_one("#banner", Static).update(
+            _make_banner(theme["env_color"], theme["host_color"])
+        )
 
-        env_panel.styles.border = ("heavy", theme["env_color"])
-        env_panel.styles.border_title_color = theme["env_color"]
-
-        host_panel.styles.border = ("heavy", theme["host_color"])
-        host_panel.styles.border_title_color = theme["host_color"]
-
-        # Update status bar (no border)
-
-        self.notify(f"Theme: {theme['name']}", timeout=2)
+        if notify:
+            self.notify(f"Theme: {theme['name']}", timeout=2)
 
     def compose(self) -> ComposeResult:
-        yield Static(VIPER_BANNER, id="banner")
+        theme = THEMES.get(self._active_theme, THEMES["viper"])
+        yield Static(_make_banner(theme["env_color"], theme["host_color"]), id="banner")
         with Horizontal(id="main-container"):
             with Vertical(id="env-panel") as env_panel:
                 env_panel.border_title = "ENVIRONMENTS"
@@ -1018,7 +1046,8 @@ class ViperApp(App):
                     yield ListView(id="host-list-left")
                     yield ListView(id="host-list-right")
         with Container(id="status-bar"):
-            yield Static(">> Select environment  [bold red]↑↓[/] [dim]navigate[/]  [bold red]Enter[/] [dim]select[/]  [bold red]?[/] [dim]help[/]  [bold red]q[/] [dim]quit[/]", id="target-display")
+            hc = theme["host_color"]
+            yield Static(f">> Select environment  [bold {hc}]↑↓[/] [dim]navigate[/]  [bold {hc}]Enter[/] [dim]select[/]  [bold {hc}]?[/] [dim]help[/]  [bold {hc}]q[/] [dim]quit[/]", id="target-display")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -1029,8 +1058,7 @@ class ViperApp(App):
             self.notify(str(e), severity="error")
             return
 
-        if self._active_theme != "viper":
-            self.action_set_theme(self._active_theme)
+        self.action_set_theme(self._active_theme, notify=False)
 
         self._populate_environments()
         env_list = self.query_one("#env-list", ListView)
@@ -1112,6 +1140,11 @@ class ViperApp(App):
             for host_info in right_hosts:
                 right_list.append(HostListItem(host_info))
 
+    @property
+    def _hc(self) -> str:
+        """Shortcut for host_color from active theme."""
+        return THEMES.get(self._active_theme, THEMES["viper"])["host_color"]
+
     def _update_status(self, message: str) -> None:
         """Update the status bar."""
         status = self.query_one("#target-display", Static)
@@ -1144,7 +1177,7 @@ class ViperApp(App):
                 self.selected_env = None  # Reset — we're just previewing
 
             self.query_one("#host-panel").border_title = f"HOSTS :: {event.item.display_name.upper()}"
-            self._update_status(f"{event.item.display_name}: {len(hosts)} hosts  [bold red]Enter[/] [dim]select[/]  [bold red]↑↓[/] [dim]browse[/]")
+            self._update_status(f"{event.item.display_name}: {len(hosts)} hosts  [bold {self._hc}]Enter[/] [dim]select[/]  [bold {self._hc}]↑↓[/] [dim]browse[/]")
 
     @on(ListView.Selected, "#env-list")
     def on_env_selected(self, event: ListView.Selected) -> None:
@@ -1179,7 +1212,7 @@ class ViperApp(App):
         else:
             self.filtered_hosts = self.current_hosts.copy()
         self._refresh_host_list()
-        self._update_status(f"Filter: {len(self.filtered_hosts)} matches  [bold red]Enter[/] [dim]jump[/]  [bold red]Esc[/] [dim]exit search[/]")
+        self._update_status(f"Filter: {len(self.filtered_hosts)} matches  [bold {self._hc}]Enter[/] [dim]jump[/]  [bold {self._hc}]Esc[/] [dim]exit search[/]")
 
     @on(Input.Submitted, "#search-box")
     def on_search_submitted(self, event: Input.Submitted) -> None:
@@ -1213,7 +1246,7 @@ class ViperApp(App):
         env_list.index = restore_index
         if env_list.children and restore_index < len(env_list.children):
             env_list.scroll_to_widget(env_list.children[restore_index])
-        self._update_status("Select environment  [bold red]↑↓[/] [dim]navigate[/]  [bold red]Enter[/] [dim]select[/]  [bold red]?[/] [dim]help[/]  [bold red]q[/] [dim]quit[/]")
+        self._update_status(f"Select environment  [bold {self._hc}]↑↓[/] [dim]navigate[/]  [bold {self._hc}]Enter[/] [dim]select[/]  [bold {self._hc}]?[/] [dim]help[/]  [bold {self._hc}]q[/] [dim]quit[/]")
         self.query_one("#host-panel").border_title = "HOSTS"
         self.call_later(env_list.focus)
 
@@ -1223,12 +1256,12 @@ class ViperApp(App):
         display_env = "\u2605 Favorites" if env == "__favorites__" else env
         self._update_status(
             f"[bold]{display_env}[/]  "
-            f"[bold red]↑↓[/] [dim]navigate[/]  "
-            f"[bold red]Enter[/] [dim]ssh[/]  "
-            f"[bold red]s[/] [dim]sftp[/]  "
-            f"[bold red]f[/] [dim]fav[/]  "
-            f"[bold red]/[/] [dim]search[/]  "
-            f"[bold red]Esc[/] [dim]back[/]"
+            f"[bold {self._hc}]↑↓[/] [dim]navigate[/]  "
+            f"[bold {self._hc}]Enter[/] [dim]ssh[/]  "
+            f"[bold {self._hc}]s[/] [dim]sftp[/]  "
+            f"[bold {self._hc}]f[/] [dim]fav[/]  "
+            f"[bold {self._hc}]/[/] [dim]search[/]  "
+            f"[bold {self._hc}]Esc[/] [dim]back[/]"
         )
 
     def action_back(self) -> None:
@@ -1267,7 +1300,7 @@ class ViperApp(App):
         if env_list.index is not None:
             self._saved_env_index = env_list.index
         self.query_one("#search-box", Input).focus()
-        self._update_status("Search mode  [dim]type to filter[/]  [bold red]Enter[/] [dim]jump[/]  [bold red]Esc[/] [dim]exit[/]")
+        self._update_status(f"Search mode  [dim]type to filter[/]  [bold {self._hc}]Enter[/] [dim]jump[/]  [bold {self._hc}]Esc[/] [dim]exit[/]")
 
     def action_help(self) -> None:
         """Show help screen."""
