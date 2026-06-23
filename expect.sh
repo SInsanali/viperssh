@@ -188,7 +188,7 @@ if {[info exists env(VIPER_PW_FD)] && $cached_password ne ""} {
             # set _sum 0; foreach _c [split $cached_password ""] { scan $_c %c _code; incr _sum $_code }
             # puts "\[DEBUG\] writing to pipe: len=[string length $cached_password] sum=$_sum"
             if {[catch {
-                set chan [open "/proc/self/fd/$pw_fd" w]
+                set chan [open "/dev/fd/$pw_fd" w]
                 puts -nonewline $chan $cached_password
                 close $chan
             } err]} {

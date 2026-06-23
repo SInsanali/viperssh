@@ -1652,28 +1652,37 @@ def main() -> None:
     returned_pw = ""
     pw_read_fd = pw_write_fd = -1
 
+    # The vault can only store a password back if it's enabled, unlocked, and
+    # we know which environment to key it under. Only then do we wire up the
+    # pipe that lets expect.sh prompt to save — otherwise expect.sh would offer
+    # to "save" a password that _handle_post_connection silently discards.
+    vault_active = vault.is_enabled() and vault.is_unlocked() and bool(env_name)
+
     if use_expect:
         # Set vault password in environment if available
-        if vault.is_enabled() and vault.is_unlocked() and env_name:
+        if vault_active:
             pw = vault.get_password(env_name)
             if pw:
                 run_env["VIPER_PASSWORD"] = pw
 
         # Create pipe for expect.sh to send back the working password
-        pw_read_fd, pw_write_fd = os.pipe()
-        run_env["VIPER_PW_FD"] = str(pw_write_fd)
+        if vault_active:
+            pw_read_fd, pw_write_fd = os.pipe()
+            run_env["VIPER_PW_FD"] = str(pw_write_fd)
 
     prev_sigint = signal.signal(signal.SIGINT, signal.SIG_IGN)
 
     if use_expect:
+        pass_fds = (pw_write_fd,) if pw_write_fd != -1 else ()
         ret = subprocess.call(
             [str(expect_script), target, proto],
-            env=run_env, pass_fds=(pw_write_fd,),
+            env=run_env, pass_fds=pass_fds,
         )
         # Close write end and read the password back from the pipe
-        os.close(pw_write_fd)
-        with os.fdopen(pw_read_fd, "r") as f:
-            returned_pw = f.read()
+        if pw_write_fd != -1:
+            os.close(pw_write_fd)
+            with os.fdopen(pw_read_fd, "r") as f:
+                returned_pw = f.read()
     elif proto == "sftp":
         ret = subprocess.call(["sftp", target])
     else:
