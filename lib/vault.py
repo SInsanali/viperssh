@@ -65,12 +65,32 @@ class Vault:
     # ── Master password helpers ──
 
     def get_master_from_file(self) -> Optional[str]:
-        """Read master password from .viper_vault_pass if it exists."""
+        """Read master password from var/vault/master if it exists."""
         try:
             pw = VAULT_PASS_FILE.read_text().strip()
             return pw if pw else None
         except OSError:
             return None
+
+    def write_master_file(self) -> bool:
+        """Persist the master password to var/vault/master for auto-unlock.
+
+        Returns False if the vault isn't unlocked (no master password in memory).
+        """
+        if self._master_pw is None:
+            return False
+        _write_secure_text(VAULT_PASS_FILE, self._master_pw)
+        return True
+
+    def clear_master_file(self) -> None:
+        """Remove the saved master password file, if present."""
+        try:
+            os.unlink(VAULT_PASS_FILE)
+        except OSError:
+            pass
+
+    def has_master_file(self) -> bool:
+        return VAULT_PASS_FILE.exists()
 
     def vault_exists(self) -> bool:
         return VAULT_FILE.exists()
@@ -132,6 +152,18 @@ class Vault:
 
     def is_unlocked(self) -> bool:
         return self._fernet is not None
+
+    def change_master_password(self, new_pw: str) -> bool:
+        """Re-encrypt the vault under a new master password.
+
+        Requires the vault to be unlocked. _save() rederives the key from the
+        new master password with a fresh salt.
+        """
+        if not self.is_unlocked():
+            return False
+        self._master_pw = new_pw
+        self._save()
+        return True
 
     # ── CRUD ──
 

@@ -519,10 +519,12 @@ class VaultScreen(ModalScreen):
     """Modal vault management screen."""
 
     BINDINGS = [
-        Binding("escape", "dismiss", "Close"),
+        Binding("escape", "cancel_or_close", "Close"),
         Binding("v", "dismiss", "Close"),
         Binding("q", "dismiss", "Close"),
         Binding("e", "toggle_vault", "Toggle"),
+        Binding("m", "set_master", "Master"),
+        Binding("p", "toggle_remember", "Remember"),
         Binding("d", "delete_password", "Delete"),
         Binding("j", "cursor_down", "Down", show=False),
         Binding("k", "cursor_up", "Up", show=False),
@@ -597,6 +599,11 @@ class VaultScreen(ModalScreen):
         self.vault = vault
         self.config_envs = config_envs
         self._editing_env: Optional[str] = None
+        # Input-mode state machine: None | env | unlock | create |
+        # create_confirm | change | change_confirm
+        self._input_mode: Optional[str] = None
+        self._pending_master: Optional[str] = None
+        self._confirm_remember: bool = False
 
     def compose(self) -> ComposeResult:
         theme = _get_theme(self.app)
@@ -620,6 +627,45 @@ class VaultScreen(ModalScreen):
         vault_list.focus()
         if self.config_envs:
             self.call_later(lambda: setattr(vault_list, "index", 0))
+        self._maybe_prompt_unlock_or_create()
+
+    def _maybe_prompt_unlock_or_create(self) -> None:
+        """If the vault is enabled but locked, prompt to unlock or create it."""
+        if not (self.vault.is_enabled() and not self.vault.is_unlocked()):
+            return
+        accent = _get_theme(self.app)["accent"]
+        if self.vault.vault_exists():
+            self._prompt_input("unlock", f"[bold {accent}]Master password to unlock[/]")
+        else:
+            self._prompt_input("create", f"[bold {accent}]Set master password[/]")
+
+    def _prompt_input(self, mode: str, label_markup: str) -> None:
+        """Show the password input in the given mode with the given label."""
+        self._input_mode = mode
+        input_label = self.query_one("#vault-input-label", Static)
+        input_label.display = True
+        input_label.update(label_markup)
+        pw_input = self.query_one("#vault-password-input", Input)
+        pw_input.display = True
+        pw_input.value = ""
+        pw_input.focus()
+        self._update_status()
+
+    def _hide_input(self) -> None:
+        """Hide the password input and return focus to the environment list."""
+        self._input_mode = None
+        self._editing_env = None
+        self._pending_master = None
+        pw_input = self.query_one("#vault-password-input", Input)
+        pw_input.display = False
+        pw_input.value = ""
+        input_label = self.query_one("#vault-input-label", Static)
+        input_label.display = False
+        vault_list = self.query_one("#vault-env-list", ListView)
+        vault_list.focus()
+        if vault_list.children:
+            self.call_later(lambda: setattr(vault_list, "index", 0))
+        self._update_status()
 
     def _update_status(self) -> None:
         theme = _get_theme(self.app)
@@ -629,12 +675,34 @@ class VaultScreen(ModalScreen):
         if enabled:
             state = f"[bold {theme['env_color']}]ENABLED[/]"
             lock = f" [dim]|[/] [{theme['env_color']}]unlocked[/]" if unlocked else f" [dim]|[/] [{theme['host_color']}]locked[/]"
+            if unlocked:
+                remember = self.vault.has_master_file()
+                rem_color = theme["env_color"] if remember else theme["host_color"]
+                lock += f" [dim]|[/] [{rem_color}]remember {'on' if remember else 'off'}[/]"
         else:
             state = f"[bold {theme['host_color']}]DISABLED[/]"
             lock = ""
         status.update(f"  Status: {state}{lock}")
+
         hint = self.query_one("#vault-hint", Static)
-        hint.update("[dim]e[/] toggle  [dim]Enter[/] set pw  [dim]d[/] delete  [dim]Esc[/] close")
+        if self._confirm_remember:
+            hint.update(
+                f"[{theme['host_color']}]Store master password in PLAINTEXT?[/] "
+                "[dim]p[/] confirm  [dim]Esc[/] cancel"
+            )
+        elif self._input_mode == "env":
+            hint.update("[dim]Enter[/] save  [dim]Esc[/] cancel")
+        elif self._input_mode is not None:
+            hint.update("[dim]Enter[/] submit  [dim]Esc[/] cancel")
+        elif not enabled:
+            hint.update("[dim]e[/] enable  [dim]Esc[/] close")
+        elif not unlocked:
+            hint.update("[dim]Enter[/] unlock  [dim]e[/] disable  [dim]Esc[/] close")
+        else:
+            hint.update(
+                "[dim]m[/] master  [dim]p[/] remember  [dim]e[/] disable  "
+                "[dim]d[/] delete  [dim]Esc[/] close"
+            )
 
     def _populate_list(self) -> None:
         vault_list = self.query_one("#vault-env-list", ListView)
@@ -649,6 +717,9 @@ class VaultScreen(ModalScreen):
         enabled = self.vault.is_enabled()
         self.vault.set_enabled(not enabled)
         self._update_status()
+        if not enabled:
+            # Just enabled — guide the user straight into unlock/create.
+            self._maybe_prompt_unlock_or_create()
 
     def action_delete_password(self) -> None:
         if not self.vault.is_unlocked():
@@ -667,33 +738,113 @@ class VaultScreen(ModalScreen):
             return
         if isinstance(event.item, VaultEnvListItem):
             self._editing_env = event.item.env_name
-            input_label = self.query_one("#vault-input-label", Static)
-            input_label.display = True
-            theme = _get_theme(self.app)
-            input_label.update(f"[bold {theme['accent']}]Password for[/] [bold]{event.item.env_name.replace('_', ' ')}[/]")
-            pw_input = self.query_one("#vault-password-input", Input)
-            pw_input.display = True
-            pw_input.value = ""
-            pw_input.focus()
-            hint = self.query_one("#vault-hint", Static)
-            hint.update("[dim]Enter[/] save  [dim]Esc[/] cancel")
+            accent = _get_theme(self.app)["accent"]
+            name = event.item.env_name.replace("_", " ")
+            self._prompt_input("env", f"[bold {accent}]Password for[/] [bold]{name}[/]")
+
+    def action_set_master(self) -> None:
+        """'m' — set/change the master password (or unlock if locked)."""
+        if not self.vault.is_enabled():
+            return
+        if not self.vault.is_unlocked():
+            self._maybe_prompt_unlock_or_create()
+            return
+        accent = _get_theme(self.app)["accent"]
+        self._prompt_input("change", f"[bold {accent}]New master password[/]")
+
+    def action_toggle_remember(self) -> None:
+        """'p' — create/remove var/vault/master (auto-unlock at startup)."""
+        if not self.vault.is_unlocked():
+            return
+        if self.vault.has_master_file():
+            self.vault.clear_master_file()
+            self._confirm_remember = False
+            self.app.notify("Remember password: off", timeout=2)
+            self._update_status()
+            return
+        if not self._confirm_remember:
+            # First press: show the plaintext warning, require a second press.
+            self._confirm_remember = True
+            self._update_status()
+            return
+        self._confirm_remember = False
+        if self.vault.write_master_file():
+            self.app.notify("Remember password: on", timeout=2)
+        self._update_status()
+
+    def action_cancel_or_close(self) -> None:
+        """Esc — back out of an active input or pending confirm, else close."""
+        pw_input = self.query_one("#vault-password-input", Input)
+        if pw_input.display:
+            self._hide_input()
+        elif self._confirm_remember:
+            self._confirm_remember = False
+            self._update_status()
+        else:
+            self.dismiss()
 
     @on(Input.Submitted, "#vault-password-input")
     def on_password_submitted(self, event: Input.Submitted) -> None:
-        if self._editing_env and event.value:
-            self.vault.set_password(self._editing_env, event.value)
-        self._editing_env = None
-        pw_input = self.query_one("#vault-password-input", Input)
-        pw_input.display = False
-        pw_input.value = ""
-        input_label = self.query_one("#vault-input-label", Static)
-        input_label.display = False
-        self._populate_list()
-        self._update_status()
-        vault_list = self.query_one("#vault-env-list", ListView)
-        vault_list.focus()
-        if vault_list.children:
-            self.call_later(lambda: setattr(vault_list, "index", 0))
+        mode = self._input_mode
+        value = event.value
+        accent = _get_theme(self.app)["accent"]
+
+        if mode == "env":
+            if self._editing_env and value:
+                self.vault.set_password(self._editing_env, value)
+            self._populate_list()
+            self._hide_input()
+
+        elif mode == "unlock":
+            if self.vault.unlock(value):
+                self._populate_list()
+                self.app.notify("Vault unlocked", timeout=2)
+                self._hide_input()
+            else:
+                self.app.notify("Wrong master password", severity="error", timeout=3)
+                pw_input = self.query_one("#vault-password-input", Input)
+                pw_input.value = ""
+                pw_input.focus()
+
+        elif mode == "create":
+            if not value:
+                self._hide_input()
+                return
+            self._pending_master = value
+            self._prompt_input("create_confirm", f"[bold {accent}]Confirm master password[/]")
+
+        elif mode == "create_confirm":
+            if value == self._pending_master:
+                self.vault.create(value)
+                self._populate_list()
+                self.app.notify("Vault created", timeout=2)
+                self._hide_input()
+            else:
+                self.app.notify("Passwords don't match", severity="error", timeout=3)
+                self._pending_master = None
+                self._prompt_input("create", f"[bold {accent}]Set master password[/]")
+
+        elif mode == "change":
+            if not value:
+                self._hide_input()
+                return
+            self._pending_master = value
+            self._prompt_input("change_confirm", f"[bold {accent}]Confirm new master password[/]")
+
+        elif mode == "change_confirm":
+            if value == self._pending_master:
+                self.vault.change_master_password(value)
+                if self.vault.has_master_file():
+                    self.vault.write_master_file()
+                self.app.notify("Master password changed", timeout=2)
+                self._hide_input()
+            else:
+                self.app.notify("Passwords don't match", severity="error", timeout=3)
+                self._pending_master = None
+                self._prompt_input("change", f"[bold {accent}]New master password[/]")
+
+        else:
+            self._hide_input()
 
     def action_cursor_down(self) -> None:
         self.query_one("#vault-env-list", ListView).action_cursor_down()
