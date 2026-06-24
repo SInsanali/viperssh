@@ -11,7 +11,10 @@ while [[ -L "$SOURCE" ]]; do
 done
 SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
 VENV_DIR="$SCRIPT_DIR/venv"
-MARKER_FILE="$SCRIPT_DIR/.viperssh_initialized"
+MARKER_FILE="$SCRIPT_DIR/var/initialized"
+
+# Runtime state lives under var/
+mkdir -p "$SCRIPT_DIR/var"
 
 # Colors
 GREEN='\033[1;32m'
@@ -431,5 +434,6 @@ if [[ ! -f "$MARKER_FILE" ]] || [[ "$1" == "--setup" ]]; then
     [[ "$1" == "--setup" ]] && shift
 fi
 
-# Run viperssh with the venv python
-exec "$VENV_DIR/bin/python3" "$SCRIPT_DIR/viper.py" "$@"
+# Run viperssh with the venv python (lib/ on PYTHONPATH for module imports)
+export PYTHONPATH="$SCRIPT_DIR/lib${PYTHONPATH:+:$PYTHONPATH}"
+exec "$VENV_DIR/bin/python3" "$SCRIPT_DIR/bin/viper.py" "$@"

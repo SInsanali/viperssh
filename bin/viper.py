@@ -18,6 +18,10 @@ from textual.containers import Container, Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Footer, Input, Label, ListItem, ListView, Static
 
+# Ensure lib/ is importable whether launched via the wrapper or directly.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+
+import paths
 from config import Config, Favorites, History, HostInfo
 from vault import Vault
 
@@ -139,7 +143,7 @@ THEMES = {
     },
 }
 
-THEME_CONFIG_FILE = Path(__file__).resolve().parent / ".viper_theme"
+THEME_CONFIG_FILE = paths.THEME_FILE
 
 
 def _get_theme(app=None) -> dict:
@@ -996,6 +1000,7 @@ class ViperApp(App):
     def _save_theme(self, theme_id: str) -> None:
         """Save theme to config file."""
         try:
+            THEME_CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
             THEME_CONFIG_FILE.write_text(theme_id)
         except OSError:
             pass
@@ -1576,6 +1581,8 @@ def _unlock_vault(vault: Vault) -> None:
 
 def main() -> None:
     """Main entry point."""
+    paths.ensure_dirs()
+    paths.migrate_legacy()
     parser = argparse.ArgumentParser(description="ViperSSH - TUI SSH Connection Manager")
     parser.add_argument(
         "-c", "--config",
@@ -1639,8 +1646,7 @@ def main() -> None:
     proto = result.proto
     env_name = result.env_name
 
-    script_dir = Path(__file__).resolve().parent
-    expect_script = script_dir / "expect.sh"
+    expect_script = paths.EXPECT_SCRIPT
     use_expect = expect_script.exists()
 
     mode_label = " via \033[1;33mSFTP\033[0m" if proto == "sftp" else ""

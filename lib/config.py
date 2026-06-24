@@ -9,6 +9,8 @@ from typing import Optional
 
 import yaml
 
+from paths import DEFAULT_CONFIG_DIR, FAVORITES_FILE, HISTORY_FILE
+
 
 @dataclass
 class HostInfo:
@@ -23,7 +25,7 @@ class Config:
     """Loads and manages ViperSSH configuration from hosts.yaml."""
 
     def __init__(self, config_dir: Optional[Path] = None) -> None:
-        self.config_dir = Path(config_dir) if config_dir else Path(__file__).resolve().parent / "etc"
+        self.config_dir = Path(config_dir) if config_dir else DEFAULT_CONFIG_DIR
         self.config_file = self.config_dir / "hosts.yaml"
         self._data: dict = {}
         self._environments: list[str] = []
@@ -94,9 +96,6 @@ class Config:
         return f"{hostname}{self.get_suffix(environment)}"
 
 
-FAVORITES_FILE = Path(__file__).resolve().parent / ".viper_favorites"
-
-HISTORY_FILE = Path(__file__).resolve().parent / ".viper_history"
 MAX_HISTORY = 10
 
 
@@ -114,6 +113,7 @@ class Favorites:
 
     def _save(self, entries: list[dict]) -> None:
         try:
+            FAVORITES_FILE.parent.mkdir(parents=True, exist_ok=True)
             FAVORITES_FILE.write_text(json.dumps(entries))
             os.chmod(FAVORITES_FILE, 0o600)
         except OSError:
@@ -176,6 +176,7 @@ class History:
         entries.insert(0, entry)
         entries = entries[:MAX_HISTORY]
         try:
+            HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
             HISTORY_FILE.write_text(json.dumps(entries))
             os.chmod(HISTORY_FILE, 0o600)
         except OSError:

@@ -76,7 +76,7 @@ environments:
 
 Press `r` to open a recent connections modal showing your last 10 connections, split into SSH and SFTP sections. Select any entry to reconnect using the original protocol.
 
-History is stored locally in `.viper_history` and is not committed to version control.
+History is stored locally in `var/history.json` and is not committed to version control.
 
 ## Password Vault
 
@@ -104,11 +104,11 @@ Press `v` to open the vault modal:
 
 ### Skipping the master password prompt
 
-Create a `.viper_vault_pass` file containing your master password:
+Create a `var/vault/master` file containing your master password:
 
 ```bash
-echo 'your-master-password' > .viper_vault_pass
-chmod 600 .viper_vault_pass
+echo 'your-master-password' > var/vault/master
+chmod 600 var/vault/master
 ```
 
 The vault will unlock automatically on launch using this file.
@@ -117,8 +117,8 @@ The vault will unlock automatically on launch using this file.
 
 | File | Purpose |
 |------|---------|
-| `.viper_vault` | AES-encrypted passwords |
-| `.viper_vault_pass` | Optional master password file |
-| `.viper_vault_config` | Vault enabled/disabled toggle |
+| `var/vault/vault.enc` | AES-encrypted passwords |
+| `var/vault/master` | Optional master password file |
+| `var/vault/config` | Vault enabled/disabled toggle |
 
-All vault files are gitignored.
+All runtime state lives under `var/` and is gitignored.

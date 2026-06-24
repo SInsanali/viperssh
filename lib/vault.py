@@ -11,10 +11,7 @@ from cryptography.fernet import Fernet, InvalidToken
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.primitives import hashes
 
-VAULT_DIR = Path(__file__).resolve().parent
-VAULT_CONFIG = VAULT_DIR / ".viper_vault_config"
-VAULT_FILE = VAULT_DIR / ".viper_vault"
-VAULT_PASS_FILE = VAULT_DIR / ".viper_vault_pass"
+from paths import VAULT_CONFIG, VAULT_FILE, VAULT_PASS_FILE
 
 PBKDF2_ITERATIONS = 480_000
 SALT_SIZE = 16
@@ -22,6 +19,7 @@ SALT_SIZE = 16
 
 def _write_secure(path: Path, data: bytes) -> None:
     """Write data to a file atomically with 0600 permissions."""
+    path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".tmp_")
     try:
         os.write(fd, data)

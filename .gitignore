@@ -3,6 +3,11 @@ __pycache__/
 *.pyc
 *.pyo
 .env
+
+# Runtime state (history, favorites, theme, vault, init marker)
+var/
+
+# Legacy state files (pre-reorg; migrated into var/ on first run)
 .viperssh_initialized
 .viper_theme
 .viper_history
