@@ -35,6 +35,7 @@ THEME_FILE = VAR / "theme"
 INITIALIZED_MARKER = VAR / "initialized"
 LAUNCH_ANIM_FILE = VAR / "launch_anim"
 SNAKE_ANIM_FILE = VAR / "snake_anim"
+SNAKE_SCORE_FILE = VAR / "snake_score"   # easter-egg game high score
 
 # Vault
 VAULT_CONFIG = VAULT_DIR / "config"

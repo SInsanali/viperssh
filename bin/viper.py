@@ -9,6 +9,7 @@ import signal
 import subprocess
 import sys
 import time
+from collections import deque
 from pathlib import Path
 from typing import NamedTuple, Optional
 
@@ -378,6 +379,10 @@ class SnakeBox(Static):
         self._head = (self._head + 1) % len(_BOX_PATH)
         self._update_tongue()
         self._redraw()
+
+    def on_click(self) -> None:
+        # Easter egg: click the logo to play Snake.
+        self.app.action_open_snake_game()
 
 
 def _make_help_text(host_color: str, env_color: str, accent: str) -> str:
@@ -1264,6 +1269,238 @@ class EnvListItem(ListItem):
         self.watch_highlighted(self.highlighted)
 
 
+class SnakeGameScreen(ModalScreen):
+    """Easter-egg Snake game — opened by clicking the VIPERSSH logo.
+
+    Steer with WASD or arrows, space to pause, r to restart (while paused or
+    on game over), esc to exit. Snake/food use the active theme colors, the
+    snake speeds up as it grows, and the best score persists to var/.
+    """
+
+    BINDINGS = [
+        Binding("up", "steer('up')", show=False),
+        Binding("w", "steer('up')", show=False),
+        Binding("down", "steer('down')", show=False),
+        Binding("s", "steer('down')", show=False),
+        Binding("left", "steer('left')", show=False),
+        Binding("a", "steer('left')", show=False),
+        Binding("right", "steer('right')", show=False),
+        Binding("d", "steer('right')", show=False),
+        Binding("space", "toggle_pause", show=False),
+        Binding("r", "restart", show=False),
+        Binding("escape", "dismiss", show=False),
+    ]
+
+    CSS = """
+    SnakeGameScreen {
+        align: center middle;
+        background: $background;
+    }
+    #game {
+        content-align: center middle;
+    }
+    """
+
+    BOARD_W = 30
+    BOARD_H = 18
+    CELL_W = 2                 # terminal columns per cell (keeps cells ~square)
+    BASE_INTERVAL = 0.13
+    MIN_INTERVAL = 0.05
+    _DIRS = {"up": (0, -1), "down": (0, 1), "left": (-1, 0), "right": (1, 0)}
+    _OPP = {"up": "down", "down": "up", "left": "right", "right": "left"}
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._timer = None
+        self._high = self._load_high()
+        self._state = "playing"
+        self._snake: deque = deque()
+        self._dir = "right"
+        self._pending = "right"
+        self._food = None
+        self._score = 0
+
+    # ── high score persistence ──
+
+    def _load_high(self) -> int:
+        try:
+            return int(paths.SNAKE_SCORE_FILE.read_text().strip())
+        except (OSError, ValueError):
+            return 0
+
+    def _save_high(self, value: int) -> None:
+        try:
+            paths.SNAKE_SCORE_FILE.parent.mkdir(parents=True, exist_ok=True)
+            paths.SNAKE_SCORE_FILE.write_text(str(value))
+        except OSError:
+            pass
+
+    # ── lifecycle ──
+
+    def compose(self) -> ComposeResult:
+        self._reset()
+        # Seed real content (fixed size) so the Static has a visual before paint.
+        g = Static(self._frame(), id="game")
+        g.styles.width = self.BOARD_W * self.CELL_W + 2
+        g.styles.height = self.BOARD_H + 4
+        yield g
+
+    def on_mount(self) -> None:
+        self._timer = self.set_interval(self.BASE_INTERVAL, self._tick)
+
+    def _reset(self) -> None:
+        cx, cy = self.BOARD_W // 2, self.BOARD_H // 2
+        self._snake = deque([(cx - 2, cy), (cx - 1, cy), (cx, cy)])  # head = last
+        self._dir = self._pending = "right"
+        self._score = 0
+        self._state = "playing"
+        self._place_food()
+
+    def _place_food(self) -> None:
+        occupied = set(self._snake)
+        empty = [(x, y) for x in range(self.BOARD_W) for y in range(self.BOARD_H)
+                 if (x, y) not in occupied]
+        self._food = random.choice(empty) if empty else None
+
+    # ── game loop ──
+
+    def _tick(self) -> None:
+        if self._state != "playing":
+            return
+        self._dir = self._pending
+        hx, hy = self._snake[-1]
+        dx, dy = self._DIRS[self._dir]
+        nx, ny = hx + dx, hy + dy
+
+        if not (0 <= nx < self.BOARD_W and 0 <= ny < self.BOARD_H):
+            self._game_over()
+            return
+
+        eating = (nx, ny) == self._food
+        body = set(self._snake)
+        if not eating:
+            body.discard(self._snake[0])   # tail vacates this step
+        if (nx, ny) in body:
+            self._game_over()
+            return
+
+        self._snake.append((nx, ny))
+        if eating:
+            self._score += 1
+            self._place_food()
+            self._respeed()
+        else:
+            self._snake.popleft()
+        self._redraw()
+
+    def _respeed(self) -> None:
+        interval = max(self.MIN_INTERVAL, self.BASE_INTERVAL - self._score * 0.004)
+        if self._timer is not None:
+            self._timer.stop()
+        self._timer = self.set_interval(interval, self._tick)
+
+    def _game_over(self) -> None:
+        self._state = "over"
+        if self._timer is not None:
+            self._timer.pause()
+        if self._score > self._high:
+            self._high = self._score
+            self._save_high(self._high)
+        self._redraw()
+
+    # ── input ──
+
+    def action_steer(self, direction: str) -> None:
+        if self._state != "playing":
+            return
+        if direction == self._OPP.get(self._dir) and len(self._snake) > 1:
+            return
+        self._pending = direction
+
+    def action_toggle_pause(self) -> None:
+        if self._state == "playing":
+            self._state = "paused"
+            if self._timer is not None:
+                self._timer.pause()
+        elif self._state == "paused":
+            self._state = "playing"
+            if self._timer is not None:
+                self._timer.resume()
+        self._redraw()
+
+    def action_restart(self) -> None:
+        if self._state not in ("paused", "over"):
+            return
+        self._reset()
+        if self._timer is not None:
+            self._timer.stop()
+        self._timer = self.set_interval(self.BASE_INTERVAL, self._tick)
+        self._redraw()
+
+    # ── rendering ──
+
+    def _redraw(self) -> None:
+        self.query_one("#game", Static).update(self._frame())
+
+    def _frame(self) -> str:
+        theme = _get_theme(self.app)
+        env, host, acc = theme["env_color"], theme["host_color"], theme["accent"]
+        head_color = Color.parse(env).blend(Color.parse("#ffffff"), 0.5).hex
+        cw = self.CELL_W
+        cell = "█" * cw
+        width = self.BOARD_W * cw + 2
+
+        snake_body = set(self._snake)
+        head = self._snake[-1]
+
+        rows = [self._center(
+            f"SCORE {self._score}    HIGH {self._high}",
+            f"[bold {acc}]SCORE[/] {self._score}    [bold {acc}]HIGH[/] {self._high}",
+            width,
+        )]
+        rows.append(f"[{acc}]╔{'═' * (self.BOARD_W * cw)}╗[/]")
+        for y in range(self.BOARD_H):
+            line = [f"[{acc}]║[/]"]
+            for x in range(self.BOARD_W):
+                if (x, y) == head:
+                    line.append(f"[{head_color}]{cell}[/]")
+                elif (x, y) in snake_body:
+                    line.append(f"[{env}]{cell}[/]")
+                elif (x, y) == self._food:
+                    line.append(f"[{host}]{cell}[/]")
+                else:
+                    line.append(" " * cw)
+            line.append(f"[{acc}]║[/]")
+            rows.append("".join(line))
+        rows.append(f"[{acc}]╚{'═' * (self.BOARD_W * cw)}╝[/]")
+
+        if self._state == "paused":
+            rows.append(self._center(
+                "PAUSED  —  space resume  r restart  esc exit",
+                f"[bold {acc}]PAUSED[/]  [dim]—  space resume  r restart  esc exit[/]",
+                width,
+            ))
+        elif self._state == "over":
+            rows.append(self._center(
+                f"GAME OVER  —  score {self._score}  —  r restart  esc exit",
+                f"[bold {host}]GAME OVER[/]  [dim]— score {self._score} —  r restart  esc exit[/]",
+                width,
+            ))
+        else:
+            rows.append(self._center(
+                "wasd / arrows  space pause  esc exit",
+                "[dim]wasd / arrows   space pause   esc exit[/]",
+                width,
+            ))
+
+        return "\n".join(rows)
+
+    @staticmethod
+    def _center(visible: str, markup: str, width: int) -> str:
+        pad = max(0, (width - len(visible)) // 2)
+        return " " * pad + markup
+
+
 class ViperApp(App):
     """Main Viper TUI application."""
 
@@ -1881,6 +2118,11 @@ class ViperApp(App):
         """Open vault management screen."""
         envs = self.config.environments
         self.push_screen(VaultScreen(self.vault, envs))
+
+    def action_open_snake_game(self) -> None:
+        """Easter egg: open the Snake game (clicking the logo)."""
+        if not isinstance(self.screen, SnakeGameScreen):
+            self.push_screen(SnakeGameScreen())
 
     def action_sftp(self) -> None:
         """Connect to the selected host via SFTP."""
