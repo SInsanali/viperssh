@@ -18,7 +18,6 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 BIN = ROOT / "bin"
-LIB = ROOT / "lib"
 ETC = ROOT / "etc"
 VAR = ROOT / "var"
 VAULT_DIR = VAR / "vault"
@@ -28,7 +27,6 @@ EXPECT_SCRIPT = BIN / "expect.sh"
 
 # Configuration
 DEFAULT_CONFIG_DIR = ETC
-HOSTS_FILE = ETC / "hosts.yaml"
 
 # Runtime state
 HISTORY_FILE = VAR / "history.json"

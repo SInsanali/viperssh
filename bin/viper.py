@@ -167,19 +167,6 @@ _BANNER_ROWS = [
 _BANNER_WIDTH = max(len(env) + len(host) for env, host in _BANNER_ROWS)
 
 
-def _banner_lines(env_color: str, host_color: str) -> list[str]:
-    """The VIPERSSH wordmark as a list of themed markup lines (each _BANNER_WIDTH wide)."""
-    lines = []
-    for env_part, host_part in _BANNER_ROWS:
-        pad = " " * (_BANNER_WIDTH - len(env_part) - len(host_part))
-        lines.append(f"[bold {env_color}]{env_part}[/][bold {host_color}]{host_part}{pad}[/]")
-    return lines
-
-
-def _make_banner(env_color: str, host_color: str) -> str:
-    return "\n" + "\n".join(_banner_lines(env_color, host_color))
-
-
 def _make_banner_frame(env_color: str, host_color: str, hi_color: str,
                        pos: int, hi_width: int = 9) -> str:
     """Render the banner with a bright highlight band centered at column ``pos``.
@@ -223,11 +210,6 @@ _SNAKE_SEGMENTS = [
 ]
 
 
-def _rule_color(env_color: str, bg: str) -> Color:
-    """Dim base color of the separator rule (snake tail melts into this)."""
-    return Color.parse(env_color).blend(Color.parse(bg), 0.80)
-
-
 def _snake_colors(env_color: str, bg: str) -> dict[str, Color]:
     """Map snake segment roles to colors derived from the active theme."""
     env = Color.parse(env_color)
@@ -240,70 +222,6 @@ def _snake_colors(env_color: str, bg: str) -> dict[str, Color]:
         "tail2": env.blend(bgc, 0.70),
         "tail3": env.blend(bgc, 0.85),
     }
-
-
-def _snake_lane_markup(env_color: str, bg: str, head: int, width: int) -> str:
-    """One animation frame: the rule with the 8-bit snake at ``head``."""
-    rule = _rule_color(env_color, bg)
-    colors = _snake_colors(env_color, bg)
-    cells: list[tuple[str, Color]] = [("═", rule)] * width
-    for i, (ch, role) in enumerate(_SNAKE_SEGMENTS):
-        pos = (head + i) % width
-        cells[pos] = (ch, colors[role])
-    return "".join(f"[{c.hex}]{ch}[/]" for ch, c in cells)
-
-
-def _rule_markup(env_color: str, bg: str, width: int) -> str:
-    """The plain (snake-off) separator rule."""
-    return f"[{_rule_color(env_color, bg).hex}]{'═' * width}[/]"
-
-
-class SnakeLane(Static):
-    """A 'living rule' under the banner: a gradient snake glides along it.
-
-    Reads colors from the active theme each frame, glides leftward and loops,
-    and pauses itself while a modal screen covers the main view. When disabled
-    it simply shows the plain separator rule.
-    """
-
-    FRAME_INTERVAL = 0.07   # ~14 fps
-
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__("", *args, **kwargs)
-        self._timer = None
-        self._head = 0
-
-    def _width(self) -> int:
-        return _BANNER_WIDTH
-
-    def on_mount(self) -> None:
-        self._render_plain()
-        self._timer = self.set_interval(self.FRAME_INTERVAL, self._tick, pause=True)
-        if getattr(self.app, "_snake_on", True):
-            self.set_running(True)
-
-    def set_running(self, running: bool) -> None:
-        if self._timer is None:
-            return
-        if running:
-            self._timer.resume()
-        else:
-            self._timer.pause()
-            self._render_plain()
-
-    def _render_plain(self) -> None:
-        theme = _get_theme(self.app)
-        self.update(_rule_markup(theme["env_color"], theme["bg"], self._width()))
-
-    def _tick(self) -> None:
-        # Don't burn cycles while a modal (vault/theme/help) covers the screen.
-        if self.app.screen is not self.screen:
-            return
-        theme = _get_theme(self.app)
-        self._head = (self._head - 1) % self._width()
-        self.update(
-            _snake_lane_markup(theme["env_color"], theme["bg"], self._head, self._width())
-        )
 
 
 # ── SnakeBox: a thick block snake crawling an invisible path around the banner ──
@@ -1264,6 +1182,10 @@ class HostListItem(ListItem):
         else:
             label.update(f"  {self.display_name}")
 
+    def refresh_theme(self) -> None:
+        """Re-render the label so theme-color changes take effect immediately."""
+        self.watch_highlighted(self.highlighted)
+
 
 class FavSectionItem(ListItem):
     """A non-interactive section header in the favorites list."""
@@ -1273,15 +1195,22 @@ class FavSectionItem(ListItem):
         self.env_display = env_display
         self.disabled = True
 
-    def compose(self) -> ComposeResult:
+    def _section_markup(self) -> str:
         theme = _get_theme(self.app)
-        yield Label(
-            f"[dim]──[/] [bold {theme['env_color']}]{self.env_display}[/] [dim]{'─' * max(1, 32 - len(self.env_display))}[/]",
-            classes="section-label",
-        )
+        dashes = "─" * max(1, 32 - len(self.env_display))
+        return f"[dim]──[/] [bold {theme['env_color']}]{self.env_display}[/] [dim]{dashes}[/]"
+
+    def compose(self) -> ComposeResult:
+        yield Label(self._section_markup(), classes="section-label")
 
     def watch_highlighted(self, highlighted: bool) -> None:
         pass
+
+    def refresh_theme(self) -> None:
+        try:
+            self.query_one(".section-label").update(self._section_markup())
+        except Exception:
+            pass
 
 
 class FavHostListItem(HostListItem):
@@ -1329,6 +1258,10 @@ class EnvListItem(ListItem):
             label.update(f"[bold {theme['env_color']}]> {self.display_name:<20}[/] [{theme['host_color']}]({self.host_count})[/]")
         else:
             label.update(f"  {self.display_name:<20} [dim {theme['host_color']}]({self.host_count})[/]")
+
+    def refresh_theme(self) -> None:
+        """Re-render the label so theme-color changes take effect immediately."""
+        self.watch_highlighted(self.highlighted)
 
 
 class ViperApp(App):
@@ -1533,6 +1466,10 @@ class ViperApp(App):
         self._saved_env_index: int = 0  # Track env position for search restore
         self._launch_anim: bool = self._load_launch_anim()
         self._snake_on: bool = self._load_snake_anim()
+        # Last status-bar message + the hint color it used, so theme switches
+        # can recolor it in place.
+        self._last_status: str = ""
+        self._last_status_hc: str = self._hc
 
     def _load_theme(self) -> str:
         """Load saved theme from config file."""
@@ -1626,8 +1563,24 @@ class ViperApp(App):
         except Exception:
             pass
 
+        # List-item labels and the status bar bake theme colors into their
+        # markup, so they must be re-rendered explicitly (CSS refresh won't
+        # touch them).
+        for item in self.query(ListItem):
+            refresh = getattr(item, "refresh_theme", None)
+            if callable(refresh):
+                refresh()
+        self._recolor_status()
+
         if notify:
             self.notify(f"Theme: {theme['name']}", timeout=2)
+
+    def _recolor_status(self) -> None:
+        """Re-emit the last status message with the current theme's hint color."""
+        if not self._last_status:
+            return
+        new = self._last_status.replace(self._last_status_hc, self._hc)
+        self._update_status(new)
 
     def compose(self) -> ComposeResult:
         theme = THEMES.get(self._active_theme, THEMES["viper"])
@@ -1646,7 +1599,10 @@ class ViperApp(App):
                     yield ListView(id="host-list-right")
         with Container(id="status-bar"):
             hc = theme["host_color"]
-            yield Static(f">> Select environment  [bold {hc}]↑↓[/] [dim]navigate[/]  [bold {hc}]Enter[/] [dim]select[/]  [bold {hc}]?[/] [dim]help[/]  [bold {hc}]q[/] [dim]quit[/]", id="target-display")
+            msg = f"Select environment  [bold {hc}]↑↓[/] [dim]navigate[/]  [bold {hc}]Enter[/] [dim]select[/]  [bold {hc}]?[/] [dim]help[/]  [bold {hc}]q[/] [dim]quit[/]"
+            self._last_status = msg
+            self._last_status_hc = hc
+            yield Static(f">> {msg}", id="target-display")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -1745,7 +1701,9 @@ class ViperApp(App):
         return THEMES.get(self._active_theme, THEMES["viper"])["host_color"]
 
     def _update_status(self, message: str) -> None:
-        """Update the status bar."""
+        """Update the status bar (remembering it for theme recoloring)."""
+        self._last_status = message
+        self._last_status_hc = self._hc
         status = self.query_one("#target-display", Static)
         status.update(f">> {message}")
 
