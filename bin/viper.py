@@ -344,15 +344,22 @@ _BOX_PATH = _box_path()
 _BOX_CORNER_DIST = _box_corner_dist()
 
 
-def _snake_box_markup(env_color: str, host_color: str, bg: str,
-                      head: int, tongue_on: bool, running: bool) -> str:
-    """Render the banner with the snake crawling an invisible perimeter path.
+def _place_snake(grid: dict, head: int, colors: dict, tongue_on: bool, tongue_hex: str) -> None:
+    """Draw one snake into the grid at ``head`` (tail→head so the head wins)."""
+    p = len(_BOX_PATH)
+    for i in reversed(range(len(_SNAKE_SEGMENTS))):
+        ch, role = _SNAKE_SEGMENTS[i]
+        grid[_BOX_PATH[(head - i) % p]] = (ch, colors[role].hex)
+    if tongue_on:
+        grid.setdefault(_BOX_PATH[(head + 1) % p], ("▪", tongue_hex))
 
-    Non-snake cells are blank (transparent) — only the wordmark and snake show.
+
+def _snake_box_markup(env_color: str, host_color: str, bg: str,
+                      head: int, tongue1_on: bool, tongue2_on: bool, running: bool) -> str:
+    """Render the banner with two snakes (env- and host-colored) crawling an
+    invisible perimeter path on opposite sides. Non-snake cells are blank.
     """
     _iw, bw, bh = _box_dims()
-    colors = _snake_colors(env_color, bg)
-    tongue_hex = Color.parse(host_color).hex
 
     # grid[(r, c)] = (glyph, style); missing == blank/transparent.
     grid: dict[tuple[int, int], tuple[str, str]] = {}
@@ -370,12 +377,12 @@ def _snake_box_markup(env_color: str, host_color: str, bg: str,
 
     if running:
         p = len(_BOX_PATH)
-        # Draw tail→head so the head sits on top at any overlap.
-        for i in reversed(range(len(_SNAKE_SEGMENTS))):
-            ch, role = _SNAKE_SEGMENTS[i]
-            grid[_BOX_PATH[(head - i) % p]] = (ch, colors[role].hex)
-        if tongue_on:
-            grid.setdefault(_BOX_PATH[(head + 1) % p], ("▪", tongue_hex))
+        # Green snake (env color) and red snake (host color, the "SSH" hue),
+        # kept exactly half a loop apart. Each flicks the other's color.
+        _place_snake(grid, head, _snake_colors(env_color, bg), tongue1_on,
+                     Color.parse(host_color).hex)
+        _place_snake(grid, (head + p // 2) % p, _snake_colors(host_color, bg), tongue2_on,
+                     Color.parse(env_color).hex)
 
     rows = []
     for r in range(bh):
@@ -402,7 +409,7 @@ class SnakeBox(Static):
         # Start with real content (default theme) so the fixed size resolves
         # before on_mount swaps in the active theme.
         t = THEMES["viper"]
-        initial = _snake_box_markup(t["env_color"], t["host_color"], t["bg"], 0, False, False)
+        initial = _snake_box_markup(t["env_color"], t["host_color"], t["bg"], 0, False, False, False)
         super().__init__(initial, *args, **kwargs)
         # Fixed size so Textual never has to measure an auto width (which fails
         # before the visual exists).
@@ -412,7 +419,7 @@ class SnakeBox(Static):
         self._timer = None
         self._head = 0
         self._running = False
-        self._tongue_frames = 0
+        self._tongue_frames = [0, 0]   # one per snake
 
     def on_mount(self) -> None:
         self._redraw()
@@ -429,19 +436,22 @@ class SnakeBox(Static):
         self._redraw()
 
     def _update_tongue(self) -> None:
-        """Random, occasionally-doubled flick — only on straight runs."""
-        if self._tongue_frames > 0:
-            self._tongue_frames -= 1
-            return
-        cdist = _BOX_CORNER_DIST[(self._head + 1) % len(_BOX_PATH)]
-        if cdist >= 2 and random.random() < 0.10:
-            self._tongue_frames = random.choice([1, 1, 2, 2, 3])
+        """Random, occasionally-doubled flicks — independent per snake, only on
+        straight runs."""
+        p = len(_BOX_PATH)
+        heads = (self._head, (self._head + p // 2) % p)
+        for s, head in enumerate(heads):
+            if self._tongue_frames[s] > 0:
+                self._tongue_frames[s] -= 1
+                continue
+            if _BOX_CORNER_DIST[(head + 1) % p] >= 2 and random.random() < 0.10:
+                self._tongue_frames[s] = random.choice([1, 1, 2, 2, 3])
 
     def _redraw(self) -> None:
         theme = _get_theme(self.app)
         self.update(_snake_box_markup(
             theme["env_color"], theme["host_color"], theme["bg"],
-            self._head, self._tongue_frames > 0, self._running,
+            self._head, self._tongue_frames[0] > 0, self._tongue_frames[1] > 0, self._running,
         ))
 
     def _tick(self) -> None:
