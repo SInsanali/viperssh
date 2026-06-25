@@ -32,14 +32,25 @@ if {[info exists env(VIPER_PASSWORD)]} {
     unset env(VIPER_PASSWORD)
 }
 
+# Restore the terminal and exit, tolerating an already-closed stdout/stderr
+# (e.g. when the user sends EOF with Ctrl+D). Writing the message must never
+# itself raise — otherwise we'd dump a Tcl stack trace instead of exiting.
+proc clean_exit {code {msg ""}} {
+    catch {stty echo}
+    if {$msg ne ""} {
+        if {[catch {puts $msg; flush stdout}]} {
+            catch {puts stderr $msg}
+        }
+    }
+    exit $code
+}
+
 # Handle Ctrl+C - restore terminal and exit cleanly
 trap {
-    stty echo
-    puts "\nCancelled."
-    exit 130
+    clean_exit 130 "\nCancelled."
 } SIGINT
 
-# Procedure to read password with Ctrl+C support
+# Procedure to read password with Ctrl+C / Ctrl+D support
 proc read_password {} {
     stty -echo
     puts -nonewline "Password: "
@@ -56,14 +67,13 @@ proc read_password {} {
             set password $expect_out(1,string)
         }
         eof {
-            stty echo
-            puts "\nCancelled."
-            exit 130
+            # Ctrl+D / closed stdin — bail out cleanly.
+            clean_exit 130 "\nCancelled."
         }
     }
 
-    puts ""
-    stty echo
+    catch {puts ""}
+    catch {stty echo}
     return $password
 }
 
@@ -135,7 +145,7 @@ expect {
         if {!$reached_shell && [info exists expect_out(buffer)]} {
             set output [string trim $expect_out(buffer)]
             if {$output ne ""} {
-                puts $output
+                catch {puts $output}
             }
         }
         exit 0
@@ -176,12 +186,17 @@ if {[info exists env(VIPER_PW_FD)] && $cached_password ne ""} {
     if {$should_prompt} {
         puts -nonewline $prompt_msg
         flush stdout
+        set answer ""
         expect_user {
             -re "(\[^\r\n]*)\[\r\n]" {
                 set answer $expect_out(1,string)
             }
+            eof {
+                # Ctrl+D at the save prompt — skip saving, hand off cleanly.
+                set answer ""
+            }
         }
-        puts ""
+        catch {puts ""}
 
         if {[string tolower [string trim $answer]] eq "y"} {
             # Debug (uncomment to trace pipe write):

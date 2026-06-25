@@ -14,7 +14,8 @@ from typing import NamedTuple, Optional
 from textual import on
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Container, Horizontal, Vertical
+from textual.color import Color
+from textual.containers import Center, Container, Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Footer, Input, Label, ListItem, ListView, Static
 
@@ -152,15 +153,279 @@ def _get_theme(app=None) -> dict:
     return THEMES.get(theme_id, THEMES["viper"])
 
 
+# Raw banner art split into (VIPER half, SSH half) per row — used both for the
+# static banner and the animated launch sequence (recolored column-by-column).
+_BANNER_ROWS = [
+    ("██╗   ██╗██╗██████╗ ███████╗██████╗ ", "███████╗███████╗██╗  ██╗"),
+    ("██║   ██║██║██╔══██╗██╔════╝██╔══██╗", "██╔════╝██╔════╝██║  ██║"),
+    ("██║   ██║██║██████╔╝█████╗  ██████╔╝", "███████╗███████╗███████║"),
+    ("╚██╗ ██╔╝██║██╔═══╝ ██╔══╝  ██╔══██╗", "╚════██║╚════██║██╔══██║"),
+    (" ╚████╔╝ ██║██║     ███████╗██║  ██║", "███████║███████║██║  ██║"),
+    ("  ╚═══╝  ╚═╝╚═╝     ╚══════╝╚═╝  ╚═╝", "╚══════╝╚══════╝╚═╝  ╚═╝"),
+]
+_BANNER_WIDTH = max(len(env) + len(host) for env, host in _BANNER_ROWS)
+
+
+def _banner_lines(env_color: str, host_color: str) -> list[str]:
+    """The VIPERSSH wordmark as a list of themed markup lines (each _BANNER_WIDTH wide)."""
+    lines = []
+    for env_part, host_part in _BANNER_ROWS:
+        pad = " " * (_BANNER_WIDTH - len(env_part) - len(host_part))
+        lines.append(f"[bold {env_color}]{env_part}[/][bold {host_color}]{host_part}{pad}[/]")
+    return lines
+
+
 def _make_banner(env_color: str, host_color: str) -> str:
-    return f"""
-[bold {env_color}]██╗   ██╗██╗██████╗ ███████╗██████╗ [/][bold {host_color}]███████╗███████╗██╗  ██╗[/]
-[bold {env_color}]██║   ██║██║██╔══██╗██╔════╝██╔══██╗[/][bold {host_color}]██╔════╝██╔════╝██║  ██║[/]
-[bold {env_color}]██║   ██║██║██████╔╝█████╗  ██████╔╝[/][bold {host_color}]███████╗███████╗███████║[/]
-[bold {env_color}]╚██╗ ██╔╝██║██╔═══╝ ██╔══╝  ██╔══██╗[/][bold {host_color}]╚════██║╚════██║██╔══██║[/]
-[bold {env_color}] ╚████╔╝ ██║██║     ███████╗██║  ██║[/][bold {host_color}]███████║███████║██║  ██║[/]
-[bold {env_color}]  ╚═══╝  ╚═╝╚═╝     ╚══════╝╚═╝  ╚═╝[/][bold {host_color}]╚══════╝╚══════╝╚═╝  ╚═╝[/]
-[dim {env_color}]═══════════════════════════════════════════════════════════════[/]"""
+    return "\n" + "\n".join(_banner_lines(env_color, host_color))
+
+
+def _make_banner_frame(env_color: str, host_color: str, hi_color: str,
+                       pos: int, hi_width: int = 9) -> str:
+    """Render the banner with a bright highlight band centered at column ``pos``.
+
+    Sweeping ``pos`` left→right makes a "strike" of light run across the
+    wordmark. Glyphs outside the band keep their base VIPER/SSH colors.
+    """
+    out_lines = []
+    for env_part, host_part in _BANNER_ROWS:
+        full = env_part + host_part
+        split = len(env_part)
+        chars = []
+        for i, ch in enumerate(full):
+            if ch == " ":
+                chars.append(" ")
+                continue
+            if pos - hi_width <= i <= pos:
+                color = hi_color
+            else:
+                color = env_color if i < split else host_color
+            chars.append(f"[bold {color}]{ch}[/]")
+        out_lines.append("".join(chars))
+    sep = "═" * _BANNER_WIDTH
+    return "\n" + "\n".join(out_lines) + f"\n[dim {env_color}]{sep}[/]"
+
+
+# 8-bit retro snake gliding along the rule (head first, glides leftward).
+# A bright head, solid body with alternating "scale" shades, and a dithered
+# tail that melts into the theme background — all derived from the theme.
+_SNAKE_SEGMENTS = [
+    ("█", "head"),
+    ("█", "body"),
+    ("█", "scale"),
+    ("█", "body"),
+    ("█", "scale"),
+    ("█", "body"),
+    ("█", "scale"),
+    ("▓", "tail1"),
+    ("▒", "tail2"),
+    ("░", "tail3"),
+]
+
+
+def _rule_color(env_color: str, bg: str) -> Color:
+    """Dim base color of the separator rule (snake tail melts into this)."""
+    return Color.parse(env_color).blend(Color.parse(bg), 0.80)
+
+
+def _snake_colors(env_color: str, bg: str) -> dict[str, Color]:
+    """Map snake segment roles to colors derived from the active theme."""
+    env = Color.parse(env_color)
+    bgc = Color.parse(bg)
+    return {
+        "head": env.blend(Color.parse("#ffffff"), 0.55),  # bright highlighted head
+        "body": env,
+        "scale": env.blend(bgc, 0.34),                    # darker scale segments
+        "tail1": env.blend(bgc, 0.52),
+        "tail2": env.blend(bgc, 0.70),
+        "tail3": env.blend(bgc, 0.85),
+    }
+
+
+def _snake_lane_markup(env_color: str, bg: str, head: int, width: int) -> str:
+    """One animation frame: the rule with the 8-bit snake at ``head``."""
+    rule = _rule_color(env_color, bg)
+    colors = _snake_colors(env_color, bg)
+    cells: list[tuple[str, Color]] = [("═", rule)] * width
+    for i, (ch, role) in enumerate(_SNAKE_SEGMENTS):
+        pos = (head + i) % width
+        cells[pos] = (ch, colors[role])
+    return "".join(f"[{c.hex}]{ch}[/]" for ch, c in cells)
+
+
+def _rule_markup(env_color: str, bg: str, width: int) -> str:
+    """The plain (snake-off) separator rule."""
+    return f"[{_rule_color(env_color, bg).hex}]{'═' * width}[/]"
+
+
+class SnakeLane(Static):
+    """A 'living rule' under the banner: a gradient snake glides along it.
+
+    Reads colors from the active theme each frame, glides leftward and loops,
+    and pauses itself while a modal screen covers the main view. When disabled
+    it simply shows the plain separator rule.
+    """
+
+    FRAME_INTERVAL = 0.07   # ~14 fps
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__("", *args, **kwargs)
+        self._timer = None
+        self._head = 0
+
+    def _width(self) -> int:
+        return _BANNER_WIDTH
+
+    def on_mount(self) -> None:
+        self._render_plain()
+        self._timer = self.set_interval(self.FRAME_INTERVAL, self._tick, pause=True)
+        if getattr(self.app, "_snake_on", True):
+            self.set_running(True)
+
+    def set_running(self, running: bool) -> None:
+        if self._timer is None:
+            return
+        if running:
+            self._timer.resume()
+        else:
+            self._timer.pause()
+            self._render_plain()
+
+    def _render_plain(self) -> None:
+        theme = _get_theme(self.app)
+        self.update(_rule_markup(theme["env_color"], theme["bg"], self._width()))
+
+    def _tick(self) -> None:
+        # Don't burn cycles while a modal (vault/theme/help) covers the screen.
+        if self.app.screen is not self.screen:
+            return
+        theme = _get_theme(self.app)
+        self._head = (self._head - 1) % self._width()
+        self.update(
+            _snake_lane_markup(theme["env_color"], theme["bg"], self._head, self._width())
+        )
+
+
+# ── SnakeBox: a thick block snake crawling an invisible path around the banner ──
+
+# Blank padding between the wordmark and the snake's path (kept small).
+_BOX_PAD_X = 3
+_BOX_PAD_Y = 1
+
+
+def _box_dims() -> tuple[int, int, int]:
+    """Interior width, box width, box height for the snake's path around the banner."""
+    iw = _BANNER_WIDTH
+    return iw, iw + 2 * _BOX_PAD_X + 2, len(_BANNER_ROWS) + 2 * _BOX_PAD_Y + 2
+
+
+def _box_path() -> list[tuple[int, int]]:
+    """Clockwise (row, col) cells around the box perimeter, starting top-left."""
+    _iw, bw, bh = _box_dims()
+    path = [(0, c) for c in range(bw)]                       # top  L→R
+    path += [(r, bw - 1) for r in range(1, bh)]              # right T→B
+    path += [(bh - 1, c) for c in range(bw - 2, -1, -1)]     # bottom R→L
+    path += [(r, 0) for r in range(bh - 2, 0, -1)]           # left  B→T
+    return path
+
+
+_BOX_PATH = _box_path()
+
+
+def _snake_box_markup(env_color: str, host_color: str, bg: str,
+                      head: int, tongue_on: bool, running: bool) -> str:
+    """Render the banner with the snake crawling an invisible perimeter path.
+
+    Non-snake perimeter cells are blank (transparent) — only the snake shows.
+    """
+    iw, bw, bh = _box_dims()
+    blines = _banner_lines(env_color, host_color)
+    colors = _snake_colors(env_color, bg)
+    tongue_color = Color.parse(host_color)
+
+    snake: dict[tuple[int, int], tuple[str, Color]] = {}
+    if running:
+        p = len(_BOX_PATH)
+        for i, (ch, role) in enumerate(_SNAKE_SEGMENTS):
+            snake[_BOX_PATH[(head - i) % p]] = (ch, colors[role])
+        if tongue_on:
+            snake.setdefault(_BOX_PATH[(head + 1) % p], ("▪", tongue_color))
+
+    def cell(r: int, c: int) -> str:
+        if (r, c) in snake:
+            ch, col = snake[(r, c)]
+            return f"[{col.hex}]{ch}[/]"
+        return " "
+
+    banner_top = 1 + _BOX_PAD_Y
+    pad = " " * _BOX_PAD_X
+    rows = []
+    for r in range(bh):
+        if r == 0 or r == bh - 1:
+            rows.append("".join(cell(r, c) for c in range(bw)))
+        else:
+            bi = r - banner_top
+            if 0 <= bi < len(blines):
+                mid = pad + blines[bi] + pad
+            else:
+                mid = " " * (bw - 2)
+            rows.append(cell(r, 0) + mid + cell(r, bw - 1))
+    return "\n".join(rows)
+
+
+class SnakeBox(Static):
+    """The VIPERSSH banner framed by a border the 8-bit snake crawls around.
+
+    Renders the whole framed region itself (no transparency tricks), so the
+    snake can round the corners over a self-owned rectangle. Theme-colored,
+    pauses under modals, and shows just the plain frame when disabled.
+    """
+
+    FRAME_INTERVAL = 0.07
+
+    def __init__(self, *args, **kwargs) -> None:
+        # Start with real content (default theme) so `width: auto` can measure
+        # the frame before on_mount swaps in the active theme.
+        t = THEMES["viper"]
+        initial = _snake_box_markup(t["env_color"], t["host_color"], t["bg"], 0, False, False)
+        super().__init__(initial, *args, **kwargs)
+        # Fixed size so Textual never has to measure an auto width (which fails
+        # before the visual exists).
+        _iw, bw, bh = _box_dims()
+        self.styles.width = bw
+        self.styles.height = bh
+        self._timer = None
+        self._head = 0
+        self._frame = 0
+        self._running = False
+
+    def on_mount(self) -> None:
+        self._redraw()
+        self._timer = self.set_interval(self.FRAME_INTERVAL, self._tick, pause=True)
+        self.set_running(getattr(self.app, "_snake_on", True))
+
+    def set_running(self, running: bool) -> None:
+        self._running = running
+        if self._timer is not None:
+            self._timer.resume() if running else self._timer.pause()
+        self._redraw()
+
+    def refresh_box(self) -> None:
+        self._redraw()
+
+    def _redraw(self) -> None:
+        theme = _get_theme(self.app)
+        tongue_on = (self._frame // 5) % 4 == 0
+        self.update(_snake_box_markup(
+            theme["env_color"], theme["host_color"], theme["bg"],
+            self._head, tongue_on, self._running,
+        ))
+
+    def _tick(self) -> None:
+        if self.app.screen is not self.screen:
+            return
+        self._head = (self._head + 1) % len(_BOX_PATH)
+        self._frame += 1
+        self._redraw()
 
 
 def _make_help_text(host_color: str, env_color: str, accent: str) -> str:
@@ -185,9 +450,98 @@ def _make_help_text(host_color: str, env_color: str, accent: str) -> str:
   [bold {host_color}]v[/]             Password vault
   [bold {host_color}]f[/]             Toggle favorite
   [bold {host_color}]s[/]             SFTP connect
+  [bold {host_color}]a[/]             Connect animation on/off
+  [bold {host_color}]A[/]             Snake animation on/off
   [bold {host_color}]q[/]             Quit
 [dim]──────────────────────────────────[/]
 [dim]       Press any key to close[/]"""
+
+
+class LaunchScreen(ModalScreen):
+    """Brief animated 'launch sequence' shown after a host is selected.
+
+    Sweeps a highlight across the VIPERSSH banner, shows the target, then
+    exits the app with the pending ConnectionRequest so the SSH session
+    starts. Any key skips straight to the connection.
+    """
+
+    CSS = """
+    LaunchScreen {
+        align: center middle;
+        background: $background;
+    }
+
+    #launch-box {
+        width: auto;
+        height: auto;
+    }
+
+    #launch-banner {
+        text-align: center;
+        width: auto;
+        height: auto;
+    }
+
+    #launch-target {
+        text-align: center;
+        width: auto;
+        padding-top: 1;
+    }
+    """
+
+    FRAME_INTERVAL = 0.04   # ~25 fps
+    STEP = 4                # columns advanced per frame
+
+    def __init__(self, request: ConnectionRequest, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._request = request
+        self._pos = -9
+        self._done = False
+        self._timer = None
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="launch-box"):
+            yield Static(id="launch-banner")
+            yield Static(id="launch-target")
+
+    def on_mount(self) -> None:
+        theme = _get_theme(self.app)
+        proto = self._request.proto.upper()
+        verb = "OPENING SFTP" if self._request.proto == "sftp" else "CONNECTING"
+        self.query_one("#launch-target", Static).update(
+            f"[bold {theme['accent']}]{verb} TO[/] "
+            f"[bold {theme['host_color']}]{self._request.target}[/]"
+        )
+        self._render_frame()
+        self._timer = self.set_interval(self.FRAME_INTERVAL, self._tick)
+
+    def _render_frame(self) -> None:
+        theme = _get_theme(self.app)
+        self.query_one("#launch-banner", Static).update(
+            _make_banner_frame(
+                theme["env_color"], theme["host_color"], theme["accent"], self._pos
+            )
+        )
+
+    def _tick(self) -> None:
+        self._pos += self.STEP
+        if self._pos > _BANNER_WIDTH + 9:
+            self._finish()
+            return
+        self._render_frame()
+
+    def on_key(self, event) -> None:
+        # Any key skips the animation and connects immediately.
+        event.stop()
+        self._finish()
+
+    def _finish(self) -> None:
+        if self._done:
+            return
+        self._done = True
+        if self._timer is not None:
+            self._timer.stop()
+        self.app.exit(result=self._request)
 
 
 class HelpScreen(ModalScreen):
@@ -954,11 +1308,11 @@ class ViperApp(App):
         background: $background;
     }
 
-    #banner {
-        height: auto;
-        text-align: center;
-        padding: 1 0;
+    #header {
         dock: top;
+        height: auto;
+        width: 100%;
+        padding: 1 0;
     }
 
     #main-container {
@@ -1119,6 +1473,8 @@ class ViperApp(App):
         Binding("v", "open_vault", "Vault"),
         Binding("f", "toggle_favorite", "Fav", show=False),
         Binding("s", "sftp", "SFTP", show=False),
+        Binding("a", "toggle_animation", "Anim", show=False),
+        Binding("A", "toggle_snake", "Snake", show=False),
         Binding("q", "quit", "Quit"),
         Binding("tab", "switch_panel", "Switch", show=False),
         Binding("j", "cursor_down", "Down", show=False),
@@ -1138,6 +1494,8 @@ class ViperApp(App):
         self.current_hosts: list[HostInfo] = []
         self.filtered_hosts: list[HostInfo] = []
         self._saved_env_index: int = 0  # Track env position for search restore
+        self._launch_anim: bool = self._load_launch_anim()
+        self._snake_on: bool = self._load_snake_anim()
 
     def _load_theme(self) -> str:
         """Load saved theme from config file."""
@@ -1155,6 +1513,52 @@ class ViperApp(App):
             THEME_CONFIG_FILE.write_text(theme_id)
         except OSError:
             pass
+
+    def _load_launch_anim(self) -> bool:
+        """Whether to play the connect animation (default on)."""
+        try:
+            return paths.LAUNCH_ANIM_FILE.read_text().strip() != "off"
+        except OSError:
+            return True
+
+    def _save_launch_anim(self, on: bool) -> None:
+        try:
+            paths.LAUNCH_ANIM_FILE.parent.mkdir(parents=True, exist_ok=True)
+            paths.LAUNCH_ANIM_FILE.write_text("on" if on else "off")
+        except OSError:
+            pass
+
+    def action_toggle_animation(self) -> None:
+        """Toggle the connect launch animation on/off (persisted)."""
+        self._launch_anim = not self._launch_anim
+        self._save_launch_anim(self._launch_anim)
+        self.notify(
+            f"Connect animation: {'on' if self._launch_anim else 'off'}", timeout=2
+        )
+
+    def _load_snake_anim(self) -> bool:
+        """Whether the ambient snake plays along the rule (default on)."""
+        try:
+            return paths.SNAKE_ANIM_FILE.read_text().strip() != "off"
+        except OSError:
+            return True
+
+    def _save_snake_anim(self, on: bool) -> None:
+        try:
+            paths.SNAKE_ANIM_FILE.parent.mkdir(parents=True, exist_ok=True)
+            paths.SNAKE_ANIM_FILE.write_text("on" if on else "off")
+        except OSError:
+            pass
+
+    def action_toggle_snake(self) -> None:
+        """Toggle the ambient snake on/off (persisted)."""
+        self._snake_on = not self._snake_on
+        self._save_snake_anim(self._snake_on)
+        try:
+            self.query_one("#snake-box", SnakeBox).set_running(self._snake_on)
+        except Exception:
+            pass
+        self.notify(f"Snake: {'on' if self._snake_on else 'off'}", timeout=2)
 
     def get_css_variables(self) -> dict[str, str]:
         """Map theme colors to Textual CSS variables."""
@@ -1179,17 +1583,19 @@ class ViperApp(App):
         # Re-apply CSS variables and refresh all styles
         self.call_later(self.refresh_css)
 
-        # Update banner with new colors
-        self.query_one("#banner", Static).update(
-            _make_banner(theme["env_color"], theme["host_color"])
-        )
+        # Re-render the banner/snake frame with the new theme colors
+        try:
+            self.query_one("#snake-box", SnakeBox).refresh_box()
+        except Exception:
+            pass
 
         if notify:
             self.notify(f"Theme: {theme['name']}", timeout=2)
 
     def compose(self) -> ComposeResult:
         theme = THEMES.get(self._active_theme, THEMES["viper"])
-        yield Static(_make_banner(theme["env_color"], theme["host_color"]), id="banner")
+        with Center(id="header"):
+            yield SnakeBox(id="snake-box")
         with Horizontal(id="main-container"):
             with Vertical(id="env-panel") as env_panel:
                 env_panel.border_title = "ENVIRONMENTS"
@@ -1692,7 +2098,11 @@ class ViperApp(App):
         if env_name == "__favorites__":
             env_name = None
         History().add(target, proto=proto, env_name=env_name or "")
-        self.exit(result=ConnectionRequest(target=target, proto=proto, env_name=env_name))
+        request = ConnectionRequest(target=target, proto=proto, env_name=env_name)
+        if self._launch_anim:
+            self.push_screen(LaunchScreen(request))
+        else:
+            self.exit(result=request)
 
 
 def _handle_post_connection(vault: Vault, env_name: Optional[str], returned_pw: str) -> None:

@@ -35,6 +35,8 @@ HISTORY_FILE = VAR / "history.json"
 FAVORITES_FILE = VAR / "favorites.json"
 THEME_FILE = VAR / "theme"
 INITIALIZED_MARKER = VAR / "initialized"
+LAUNCH_ANIM_FILE = VAR / "launch_anim"
+SNAKE_ANIM_FILE = VAR / "snake_anim"
 
 # Vault
 VAULT_CONFIG = VAULT_DIR / "config"
