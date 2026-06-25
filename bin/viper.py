@@ -4,6 +4,7 @@
 import argparse
 import getpass
 import os
+import random
 import signal
 import subprocess
 import sys
@@ -328,63 +329,78 @@ def _box_path() -> list[tuple[int, int]]:
     return path
 
 
+def _box_corner_dist() -> list[int]:
+    """Distance from each path cell to the nearest corner (for tongue gating)."""
+    _iw, bw, bh = _box_dims()
+    lens = [bw, bh - 1, bw - 1, bh - 2]   # top, right, bottom, left
+    dists = []
+    for elen in lens:
+        for pos in range(elen):
+            dists.append(min(pos, elen - 1 - pos))
+    return dists
+
+
 _BOX_PATH = _box_path()
+_BOX_CORNER_DIST = _box_corner_dist()
 
 
 def _snake_box_markup(env_color: str, host_color: str, bg: str,
                       head: int, tongue_on: bool, running: bool) -> str:
     """Render the banner with the snake crawling an invisible perimeter path.
 
-    Non-snake perimeter cells are blank (transparent) — only the snake shows.
+    Non-snake cells are blank (transparent) — only the wordmark and snake show.
     """
-    iw, bw, bh = _box_dims()
-    blines = _banner_lines(env_color, host_color)
+    _iw, bw, bh = _box_dims()
     colors = _snake_colors(env_color, bg)
-    tongue_color = Color.parse(host_color)
+    tongue_hex = Color.parse(host_color).hex
 
-    snake: dict[tuple[int, int], tuple[str, Color]] = {}
+    # grid[(r, c)] = (glyph, style); missing == blank/transparent.
+    grid: dict[tuple[int, int], tuple[str, str]] = {}
+
+    # Wordmark, placed in the centre with padding all around.
+    banner_top, banner_left = 1 + _BOX_PAD_Y, 1 + _BOX_PAD_X
+    for br, (env_part, host_part) in enumerate(_BANNER_ROWS):
+        line = env_part + host_part
+        split = len(env_part)
+        for col, ch in enumerate(line):
+            if ch == " ":
+                continue
+            color = env_color if col < split else host_color
+            grid[(banner_top + br, banner_left + col)] = (ch, f"bold {color}")
+
     if running:
         p = len(_BOX_PATH)
-        for i, (ch, role) in enumerate(_SNAKE_SEGMENTS):
-            snake[_BOX_PATH[(head - i) % p]] = (ch, colors[role])
+        # Draw tail→head so the head sits on top at any overlap.
+        for i in reversed(range(len(_SNAKE_SEGMENTS))):
+            ch, role = _SNAKE_SEGMENTS[i]
+            grid[_BOX_PATH[(head - i) % p]] = (ch, colors[role].hex)
         if tongue_on:
-            snake.setdefault(_BOX_PATH[(head + 1) % p], ("▪", tongue_color))
+            grid.setdefault(_BOX_PATH[(head + 1) % p], ("▪", tongue_hex))
 
-    def cell(r: int, c: int) -> str:
-        if (r, c) in snake:
-            ch, col = snake[(r, c)]
-            return f"[{col.hex}]{ch}[/]"
-        return " "
-
-    banner_top = 1 + _BOX_PAD_Y
-    pad = " " * _BOX_PAD_X
     rows = []
     for r in range(bh):
-        if r == 0 or r == bh - 1:
-            rows.append("".join(cell(r, c) for c in range(bw)))
-        else:
-            bi = r - banner_top
-            if 0 <= bi < len(blines):
-                mid = pad + blines[bi] + pad
-            else:
-                mid = " " * (bw - 2)
-            rows.append(cell(r, 0) + mid + cell(r, bw - 1))
+        line = []
+        for c in range(bw):
+            cell = grid.get((r, c))
+            line.append(f"[{cell[1]}]{cell[0]}[/]" if cell else " ")
+        rows.append("".join(line))
     return "\n".join(rows)
 
 
 class SnakeBox(Static):
-    """The VIPERSSH banner framed by a border the 8-bit snake crawls around.
+    """The VIPERSSH wordmark with a slithering 8-bit snake circling it.
 
-    Renders the whole framed region itself (no transparency tricks), so the
-    snake can round the corners over a self-owned rectangle. Theme-colored,
-    pauses under modals, and shows just the plain frame when disabled.
+    Renders the whole region itself (no transparency tricks); the snake
+    undulates into an invisible padding ring around the banner, shimmers as it
+    moves, and flicks its tongue at random. Theme-colored, pauses under modals,
+    and shows just the bare wordmark when disabled.
     """
 
     FRAME_INTERVAL = 0.07
 
     def __init__(self, *args, **kwargs) -> None:
-        # Start with real content (default theme) so `width: auto` can measure
-        # the frame before on_mount swaps in the active theme.
+        # Start with real content (default theme) so the fixed size resolves
+        # before on_mount swaps in the active theme.
         t = THEMES["viper"]
         initial = _snake_box_markup(t["env_color"], t["host_color"], t["bg"], 0, False, False)
         super().__init__(initial, *args, **kwargs)
@@ -395,8 +411,8 @@ class SnakeBox(Static):
         self.styles.height = bh
         self._timer = None
         self._head = 0
-        self._frame = 0
         self._running = False
+        self._tongue_frames = 0
 
     def on_mount(self) -> None:
         self._redraw()
@@ -412,19 +428,27 @@ class SnakeBox(Static):
     def refresh_box(self) -> None:
         self._redraw()
 
+    def _update_tongue(self) -> None:
+        """Random, occasionally-doubled flick — only on straight runs."""
+        if self._tongue_frames > 0:
+            self._tongue_frames -= 1
+            return
+        cdist = _BOX_CORNER_DIST[(self._head + 1) % len(_BOX_PATH)]
+        if cdist >= 2 and random.random() < 0.10:
+            self._tongue_frames = random.choice([1, 1, 2, 2, 3])
+
     def _redraw(self) -> None:
         theme = _get_theme(self.app)
-        tongue_on = (self._frame // 5) % 4 == 0
         self.update(_snake_box_markup(
             theme["env_color"], theme["host_color"], theme["bg"],
-            self._head, tongue_on, self._running,
+            self._head, self._tongue_frames > 0, self._running,
         ))
 
     def _tick(self) -> None:
         if self.app.screen is not self.screen:
             return
         self._head = (self._head + 1) % len(_BOX_PATH)
-        self._frame += 1
+        self._update_tongue()
         self._redraw()
 
 
@@ -1482,6 +1506,9 @@ class ViperApp(App):
     ]
 
     TITLE = "VIPERSSH"
+
+    # No command palette (drops the "^p palette" entry from the footer).
+    ENABLE_COMMAND_PALETTE = False
 
     def __init__(self, config_dir: Optional[Path] = None, vault: Optional[Vault] = None) -> None:
         self._active_theme = self._load_theme()
