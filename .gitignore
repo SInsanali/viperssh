@@ -28,3 +28,6 @@ etc/hosts.yaml
 
 # Personal dev files
 .local/
+
+# End-to-end test workspace (tests/e2e/run.sh)
+tests/e2e/.work/

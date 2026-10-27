@@ -199,6 +199,159 @@ send "q"
 expect eof
 '
 
+# Test 10: Connection status output - bin/expect.sh driven through
+# tests/preview.sh against the fake ssh in tests/fake_ssh. `see RE` fails the
+# test unless RE shows up before a timeout or EOF. Status tags are colored,
+# hence the [^\n]* between a step and its tag.
+STATUS_PRELUDE='
+set timeout 8
+set env(FAKE_SSH_DELAY) 0
+proc see {re} {
+    expect {
+        -re $re {}
+        timeout { puts "\ntimed out waiting for: $re"; exit 1 }
+        eof { puts "\nexited before: $re"; exit 1 }
+    }
+}
+proc shell_exit {} {
+    see {\$ $}
+    send "exit\r"
+    expect eof
+}
+'
+
+run_test "Status: login steps" expect -c "$STATUS_PRELUDE"'
+spawn tests/preview.sh ok
+see {Connecting to app1\.dev\.example\.local[^\n]*OK}
+see {Password for bob@app1\.dev\.example\.local: }
+send "hunter2\r"
+see {Authenticating bob@app1\.dev\.example\.local[^\n]*OK}
+shell_exit
+'
+
+run_test "Status: proxy jump" expect -c "$STATUS_PRELUDE"'
+spawn tests/preview.sh jump --vault hunter2
+see {Proxy jump via bastion\.example\.com[^\n]*OK}
+see {Authenticating bob@bastion\.example\.com[^\n]*OK}
+see {Connecting to app1\.dev\.example\.local[^\n]*OK}
+see {Authenticating bob@app1\.dev\.example\.local[^\n]*OK}
+shell_exit
+'
+
+run_test "Status: rejected password re-prompts" expect -c "$STATUS_PRELUDE"'
+spawn tests/preview.sh ok --vault wrongpw
+see {Authenticating bob@app1[^\n]*FAIL}
+see {Saved password was rejected}
+see {Password for bob@app1\.dev\.example\.local: }
+send "hunter2\r"
+see {Authenticating bob@app1[^\n]*OK}
+see {Update saved password}
+send "n\r"
+shell_exit
+'
+
+run_test "Status: expired password change + reconnect" expect -c "$STATUS_PRELUDE"'
+spawn tests/preview.sh expired --vault hunter2
+see {Password expired[^\n]*WARN}
+see {New password: }
+send "short\r"
+see {Confirm new password: }
+send "short\r"
+see {Changing password[^\n]*FAIL}
+see {BAD PASSWORD}
+see {New password: }
+send "Sup3rSecret!\r"
+see {Confirm new password: }
+send "Sup3rSecret!\r"
+see {Changing password[^\n]*OK}
+see {Reconnecting to [^\n]*app1}
+see {Authenticating bob@app1[^\n]*OK}
+see {Update saved password}
+send "n\r"
+shell_exit
+'
+
+run_test "Status: jump host shares the changed password" expect -c "$STATUS_PRELUDE"'
+spawn tests/preview.sh jump-expired --vault hunter2
+see {New password: }
+send "Sup3rSecret!\r"
+see {Confirm new password: }
+send "Sup3rSecret!\r"
+see {Reconnecting to [^\n]*app1}
+see {Authenticating bob@bastion[^\n]*FAIL}
+see {Trying your new password}
+see {Authenticating bob@bastion[^\n]*OK}
+see {Authenticating bob@app1[^\n]*OK}
+see {Update saved password}
+send "n\r"
+shell_exit
+'
+
+run_test "Status: expired keyboard-interactive change" expect -c "$STATUS_PRELUDE"'
+spawn tests/preview.sh expired-kbdint --vault hunter2
+see {Password expired[^\n]*WARN}
+see {New password: }
+send "Sup3rSecret!\r"
+see {Confirm new password: }
+send "Sup3rSecret!\r"
+see {Changing password[^\n]*OK}
+expect {
+    -re {Reconnecting} { exit 1 }
+    -re {Update saved password} { send "n\r" }
+    timeout { exit 1 }
+}
+shell_exit
+'
+
+run_test "Status: IPA refuses a change, login starts over" expect -c "$STATUS_PRELUDE"'
+spawn tests/preview.sh expired-ipa --vault hunter2
+see {Password expired[^\n]*WARN}
+see {New password: }
+send "short\r"
+see {Confirm new password: }
+send "short\r"
+see {Changing password[^\n]*FAIL}
+see {Server message: Password is too short}
+see {Authenticating bob@app1[^\n]*OK}
+see {New password: }
+send "Sup3rSecret!\r"
+see {Confirm new password: }
+send "Sup3rSecret!\r"
+see {Changing password[^\n]*OK}
+see {Update saved password}
+send "n\r"
+shell_exit
+'
+
+run_test "Status: IPA refuses a change and hangs up, try again" expect -c "$STATUS_PRELUDE"'
+spawn tests/preview.sh expired-ipa-pw --vault hunter2
+see {New password: }
+send "short\r"
+see {Confirm new password: }
+send "short\r"
+see {Changing password[^\n]*FAIL}
+see {Try another password\? \(y/n\) }
+send "y\r"
+see {Reconnecting to [^\n]*app1}
+see {New password: }
+send "Sup3rSecret!\r"
+see {Confirm new password: }
+send "Sup3rSecret!\r"
+see {Changing password[^\n]*OK}
+see {Reconnecting to [^\n]*app1}
+see {Authenticating bob@app1[^\n]*OK}
+see {Update saved password}
+send "n\r"
+shell_exit
+'
+
+run_test "Status: connection failure shows ssh error" expect -c "$STATUS_PRELUDE"'
+spawn tests/preview.sh refused
+see {Connecting to app1[^\n]*FAIL}
+see {Connection refused}
+expect eof
+'
+
 echo ""
 echo -e "${CYAN}=== Results ===${RESET}"
 echo -e "  ${GREEN}Passed: $PASSED${RESET}"

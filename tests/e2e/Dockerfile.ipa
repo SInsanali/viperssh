@@ -1,0 +1,29 @@
+# FreeIPA server that also takes SSH logins, so IPA accounts (sssd/pam_sss)
+# can be tested the way an IPA-joined host handles them
+FROM quay.io/freeipa/freeipa-server:rocky-9
+
+# Parts of /etc (pam.d, sysconfig, systemd/system) live on the /data volume,
+# seeded from /data-template on first start. So fill /data from the template
+# for the install, then copy the result back into the template.
+# extra_ca: a TLS-inspection proxy's CA, if dnf needs one to reach the mirrors
+# (handed to dnf directly, since /etc/pki is on the volume too). rpm also needs
+# /var/tmp, which points into the /tmp volume.
+# Port 22 has keyboard-interactive on, as ipa-server-install's 04-ipa.conf
+# sets it (repeated here because /etc/ssh isn't on the volume, so a recreated
+# container would lose it); 2222 is password auth only, like a stock RHEL
+# host. Host keys are made here so they survive a recreate too.
+RUN --mount=type=secret,id=extra_ca,required=false \
+    ca=""; [ -s /run/secrets/extra_ca ] && ca="--setopt=sslcacert=/run/secrets/extra_ca"; \
+    cp -a /data-template/. /data/ \
+ && mkdir -p /tmp/var/tmp \
+ && dnf -y $ca install openssh-server \
+ && dnf clean all \
+ && systemctl enable sshd \
+ && sed -i 's/^session\s\+required\s\+pam_loginuid.so/session optional pam_loginuid.so/' /etc/pam.d/sshd \
+ && cp -a /data/. /data-template/ \
+ && ssh-keygen -A \
+ && mkdir -p /etc/ssh/sshd_config.d \
+ && printf 'Port 22\nPort 2222\nKbdInteractiveAuthentication yes\n' > /etc/ssh/sshd_config.d/05-viperssh-e2e.conf \
+ && printf '\n# viperssh e2e: password auth only on 2222\nMatch LocalPort 2222\n    KbdInteractiveAuthentication no\n' >> /etc/ssh/sshd_config
+
+COPY ipa-password-state /usr/local/bin/password-state

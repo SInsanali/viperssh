@@ -2450,7 +2450,9 @@ def main() -> None:
     mode_label = " via \033[1;33mSFTP\033[0m" if proto == "sftp" else ""
     sys.stdout.write(f"\033]0;{target}\007")
     sys.stdout.flush()
-    print(f"\n\033[1;32m[VIPERSSH]\033[0m Connecting to \033[1;36m{target}\033[0m{mode_label}\n")
+    # expect.sh prints its own header above the connection steps
+    if not use_expect:
+        print(f"\n\033[1;32m[VIPERSSH]\033[0m Connecting to \033[1;36m{target}\033[0m{mode_label}\n")
 
     run_env = os.environ.copy()
     returned_pw = ""

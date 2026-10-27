@@ -1,0 +1,221 @@
+#!/bin/bash
+# Stand-in for ssh used by tests/preview.sh and tests/run_tests.sh. It plays
+# back what a server shows for $FAKE_SSH_SCENARIO, so expect.sh's status output
+# can be exercised without a live host. Scenarios:
+#
+#   ok              password login
+#   hostkey         unknown host key, then login
+#   jump            ProxyJump through a bastion that also asks for a password
+#   jump-expired    the same, with a forced change (the bastion shares the password)
+#   proxycmd        ProxyCommand "ssh -W" through a bastion that uses keys
+#   expiring        login with a "password will expire" warning
+#   expired         forced change, then the server signs you out (pam_unix)
+#   expired-kbdint  forced change inside a keyboard-interactive login (pam_unix)
+#   expired-ipa     IPA keyboard-interactive: a refused change starts the login over
+#   expired-ipa-pw  IPA password auth: a refused change hangs up
+#   refused         connection refused
+#   jump-fail       bastion can't be resolved
+#
+# The login password is $FAKE_SSH_PASSWORD (default hunter2). A completed change
+# is written to $FAKE_SSH_STATE so the reconnect logs in with the new one.
+
+scenario="${FAKE_SSH_SCENARIO:-ok}"
+dest="${!#}"
+host="${dest#*@}"
+user=bob
+[[ "$dest" == *@* ]] && user="${dest%%@*}"
+bastion=bastion.example.com
+
+# ssh -G: report the route for expect.sh to display
+if [[ "$1" == "-G" ]]; then
+    printf 'user %s\nhostname %s\nport 22\n' "$user" "$host"
+    case "$scenario" in
+        jump*)    echo "proxyjump $bastion" ;;
+        proxycmd) echo "proxycommand ssh -W %h:22 $bastion" ;;
+    esac
+    exit 0
+fi
+
+password="${FAKE_SSH_PASSWORD:-hunter2}"
+expired=0
+[[ "$scenario" == *expired* ]] && expired=1
+if [[ -s "$FAKE_SSH_STATE" ]]; then
+    password="$(cat "$FAKE_SSH_STATE")"
+    expired=0
+fi
+
+# keyboard-interactive prefixes prompts with "(user@host) " and folds any
+# messages into the next prompt; pam_unix's passwd prints them as lines.
+# IPA (sssd) checks a new password only once both entries are in, and gives
+# up on the first refusal.
+ipa=0
+[[ "$scenario" == expired-ipa* ]] && ipa=1
+if [[ "$scenario" == expired-kbdint || "$scenario" == expired-ipa ]]; then
+    style=kbdint
+else
+    style=passwd
+fi
+if (( ipa )); then
+    p_current="Current Password: " p_new="New password: " p_retype="Retype new password: "
+elif [[ $style == kbdint ]]; then
+    p_current="Current Password: " p_new="New Password: " p_retype="Reenter new Password: "
+else
+    p_current="Current password: " p_new="New password: " p_retype="Retype new password: "
+fi
+note=""
+
+# Look like a network round trip so pending steps are visible
+pause() { sleep "${FAKE_SSH_DELAY:-0.6}"; }
+
+# ask PROMPT: read a hidden reply into $REPLY, like ssh's password prompts
+ask() {
+    printf '%s' "$1"
+    IFS= read -rs REPLY || exit 255
+    echo
+}
+
+# tell MESSAGE / prompt TEXT: server output and prompts in the current style
+tell() {
+    if [[ $style == kbdint ]]; then note="$note$1"$'\n'; else echo "$1"; fi
+}
+prompt() {
+    if [[ $style == kbdint ]]; then ask "($user@$host) $note$1"; note=""; else ask "$1"; fi
+}
+
+# login WHO [kbd]: password (or keyboard-interactive) auth, three tries
+login() {
+    local tries
+    for tries in 1 2 3; do
+        if [[ -n "$2" ]]; then ask "($1) Password: "; else ask "$1's password: "; fi
+        pause
+        [[ "$REPLY" == "$password" ]] && return
+        [[ -z "$2" ]] && (( tries < 3 )) && echo "Permission denied, please try again."
+    done
+    echo "$1: Permission denied (publickey,password,keyboard-interactive)."
+    exit 255
+}
+
+# change_password: Current / New / Retype with pam_pwquality-style checks
+change_password() {
+    local tries new
+    prompt "$p_current"
+    pause
+    if [[ "$REPLY" != "$password" ]]; then
+        echo "passwd: Authentication token manipulation error"
+        return 1
+    fi
+    if (( ipa )); then
+        prompt "$p_new"
+        new="$REPLY"
+        prompt "$p_retype"
+        pause
+        if [[ "$REPLY" != "$new" ]] || (( ${#new} < 8 )); then
+            echo "Password change failed. Server message: Password is too short"
+            echo
+            echo "Password not changed."
+            return 1
+        fi
+        [[ -n "$FAKE_SSH_STATE" ]] && printf '%s' "$new" > "$FAKE_SSH_STATE"
+        [[ $style == passwd ]] && echo "passwd: all authentication tokens updated successfully."
+        return 0
+    fi
+    for tries in 1 2 3; do
+        prompt "$p_new"
+        new="$REPLY"
+        pause
+        if (( ${#new} < 8 )); then
+            tell "BAD PASSWORD: The password is shorter than 8 characters"
+            continue
+        elif [[ "$new" == "$password" ]]; then
+            tell "BAD PASSWORD: The password is the same as the old one"
+            continue
+        fi
+        prompt "$p_retype"
+        pause
+        if [[ "$REPLY" != "$new" ]]; then
+            tell "Sorry, passwords do not match."
+            continue
+        fi
+        [[ -n "$FAKE_SSH_STATE" ]] && printf '%s' "$new" > "$FAKE_SSH_STATE"
+        [[ $style == passwd ]] && echo "passwd: all authentication tokens updated successfully."
+        return 0
+    done
+    echo "passwd: Have exhausted maximum number of retries for service"
+    return 1
+}
+
+shell() {
+    echo "Last login: Tue Oct 27 08:12:44 2026 from 10.0.0.1"
+    local line
+    while true; do
+        printf '[%s@%s ~]$ ' "$user" "${host%%.*}"
+        IFS= read -r line || exit 0
+        case "$line" in
+            exit|logout) echo logout; echo "Connection to $host closed."; exit 0 ;;
+            "") ;;
+            *) echo "(fake shell) $line" ;;
+        esac
+    done
+}
+
+pause
+case "$scenario" in
+    refused)
+        echo "ssh: connect to host $host port 22: Connection refused"
+        exit 255
+        ;;
+    jump-fail)
+        echo "ssh: Could not resolve hostname $bastion: nodename nor servname provided, or not known"
+        echo "Connection closed by UNKNOWN port 65535"
+        exit 255
+        ;;
+    jump|jump-expired)
+        login "$user@$bastion"
+        pause
+        ;;
+    proxycmd)
+        pause
+        ;;
+    hostkey)
+        echo "The authenticity of host '$host (10.0.0.5)' can't be established."
+        echo "ED25519 key fingerprint is SHA256:q3Vb7T0k1mXz4rYf8nLd2pWc6hJs9aGe5uKo0iBvR1E."
+        echo "This key is not known by any other names."
+        printf 'Are you sure you want to continue connecting (yes/no/[fingerprint])? '
+        read -r answer
+        [[ "$answer" == yes ]] || { echo "Host key verification failed."; exit 255; }
+        echo "Warning: Permanently added '$host' (ED25519) to the list of known hosts."
+        pause
+        ;;
+esac
+
+if [[ $style == kbdint ]]; then login "$user@$host" kbd; else login "$user@$host"; fi
+
+if (( expired )) && [[ $style == kbdint ]]; then
+    for round in 1 2 3; do
+        tell "Password expired. Change your password now."
+        change_password && break
+        if (( !ipa || round == 3 )); then
+            echo "$user@$host: Permission denied (keyboard-interactive)."
+            exit 255
+        fi
+        # IPA starts the login over after a refused change
+        echo
+        login "$user@$host" kbd
+    done
+elif (( expired )); then
+    if (( ipa )); then
+        echo "Password expired. Change your password now."
+    else
+        echo "You are required to change your password immediately (administrator enforced)"
+    fi
+    echo "Last login: Mon Oct 26 16:40:02 2026 from 10.0.0.1"
+    echo "WARNING: Your password has expired."
+    echo "You must change your password now and login again!"
+    echo "Changing password for user $user."
+    change_password || { (( ipa )) && echo "passwd: Authentication token manipulation error"; }
+    echo "Connection to $host closed."
+    exit 1
+fi
+
+[[ "$scenario" == expiring ]] && echo "Warning: your password will expire in 5 days"
+shell

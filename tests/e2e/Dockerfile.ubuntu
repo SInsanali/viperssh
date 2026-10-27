@@ -1,0 +1,11 @@
+# Ubuntu sshd (pam_unix + pam_pwquality) for the end-to-end tests
+FROM ubuntu:24.04
+
+RUN apt-get update \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends openssh-server libpam-pwquality cracklib-runtime \
+ && rm -rf /var/lib/apt/lists/* \
+ && useradd -m -s /bin/bash bob \
+ && sed -i 's/^session\s\+required\s\+pam_loginuid.so/session optional pam_loginuid.so/' /etc/pam.d/sshd
+
+COPY password-state entrypoint.sh /usr/local/bin/
+CMD ["/usr/local/bin/entrypoint.sh"]

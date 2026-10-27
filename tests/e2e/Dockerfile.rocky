@@ -1,0 +1,16 @@
+# RHEL-family sshd (pam_unix + pam_pwquality) for the end-to-end tests
+FROM rockylinux/rockylinux:9
+
+# extra_ca: a TLS-inspection proxy's CA, if dnf needs one to reach the mirrors
+RUN --mount=type=secret,id=extra_ca,required=false \
+    if [ -s /run/secrets/extra_ca ]; then \
+        cp /run/secrets/extra_ca /etc/pki/ca-trust/source/anchors/extra-ca.pem && update-ca-trust; \
+    fi \
+ && dnf -y install openssh-server passwd libpwquality \
+ && dnf clean all \
+ && ssh-keygen -A \
+ && useradd -m bob \
+ && sed -i 's/^session\s\+required\s\+pam_loginuid.so/session optional pam_loginuid.so/' /etc/pam.d/sshd
+
+COPY password-state entrypoint.sh /usr/local/bin/
+CMD ["/usr/local/bin/entrypoint.sh"]

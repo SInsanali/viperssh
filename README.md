@@ -72,6 +72,26 @@ environments:
 | `Esc` | Back |
 | `q` | Quit |
 
+## Connecting
+
+With `expect` installed, each stage of the connection is reported as it happens:
+
+```
+[VIPERSSH] Connecting to app1.dev.example.local
+
+  Proxy jump via bastion ................................ [ OK ]
+  Connecting to app1.dev.example.local .................. [ OK ]
+  Authenticating bob@app1.dev.example.local ............. [ OK ]
+```
+
+Jump hosts are read from `~/.ssh/config` (`ProxyJump`, or `ProxyCommand ssh -W ...`). If a password is rejected you're asked for it again; on failure, ssh's error is shown under the failed step.
+
+### Expired passwords
+
+If the server says your password has expired, ViperSSH walks you through changing it: it answers the current-password prompt, asks for the new password twice (catching typos before they use up the server's retries), and shows the server's reason if it refuses one. If the server signs you out after the change, ViperSSH reconnects with the new password and offers to save it to the vault.
+
+This works with local accounts (pam_unix) and FreeIPA accounts (sssd). IPA checks a new password against its policy only after you've entered it twice; if it refuses, ViperSSH shows IPA's message and lets you try another, logging back in with your old password when the server needs that. When the bastion and the target share an IPA account, the new password is used on both.
+
 ## Connection History
 
 Press `r` to open a recent connections modal showing your last 10 connections, split into SSH and SFTP sections. Select any entry to reconnect using the original protocol.
@@ -122,3 +142,24 @@ The vault will unlock automatically on launch using this file.
 | `var/vault/config` | Vault enabled/disabled toggle |
 
 All runtime state lives under `var/` and is gitignored.
+
+## Development
+
+```bash
+./tests/run_tests.sh         # test suite
+./tests/preview.sh           # list simulated connection scenarios
+./tests/preview.sh expired   # preview the connection output for one (password: hunter2)
+```
+
+`tests/preview.sh` runs `bin/expect.sh` against a fake `ssh` (`tests/fake_ssh/ssh`), so connection output — proxy jumps, rejected and expired passwords, connection failures — can be checked without a live host.
+
+For real servers, `tests/e2e/run.sh` runs sshd in Docker (Rocky Linux and Ubuntu with local accounts, plus an optional FreeIPA server) and connects with a copy of this working tree, leaving your own vault, history and `~/.ssh` alone:
+
+```bash
+tests/e2e/run.sh up ipa              # start the servers (FreeIPA's first start takes a few minutes)
+tests/e2e/run.sh connect ipa         # or rhel-jump, rhel-kbd, ubuntu, ipa-jump, ... (bob / hunter2)
+tests/e2e/run.sh state ipa expired   # reset a server's password state
+tests/e2e/run.sh down
+```
+
+Run `tests/e2e/run.sh` with no arguments for the full list of hosts and commands.
