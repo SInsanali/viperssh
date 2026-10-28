@@ -7,7 +7,9 @@
 #   --vault           also show the vault save/update prompt (nothing is saved)
 #   --vault PASSWORD  ...starting with PASSWORD as the saved password
 #
-# The fake login password is hunter2. Type "exit" to leave the fake shell.
+# The fake login password is hunter2. Type "exit" to leave the fake shell, or
+# idle-logout / server-gone / server-closed to see how a timeout or the server
+# ending the session is reported.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"

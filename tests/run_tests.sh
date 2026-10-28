@@ -345,6 +345,30 @@ send "n\r"
 shell_exit
 '
 
+run_test "Status: disconnect line after logout" expect -c "$STATUS_PRELUDE"'
+spawn tests/preview.sh ok --vault hunter2
+see {\$ $}
+send "exit\r"
+see {Disconnected from [^\n]*app1}
+expect eof
+'
+
+run_test "Status: disconnect line on idle timeout" expect -c "$STATUS_PRELUDE"'
+spawn tests/preview.sh ok --vault hunter2
+see {\$ $}
+send "idle-logout\r"
+see {Disconnected from [^\n]*app1[^\n]*logged out for inactivity}
+expect eof
+'
+
+run_test "Status: disconnect line when the server stops responding" expect -c "$STATUS_PRELUDE"'
+spawn tests/preview.sh ok --vault hunter2
+see {\$ $}
+send "server-gone\r"
+see {Lost connection to [^\n]*app1[^\n]*the server stopped responding}
+expect eof
+'
+
 run_test "Status: connection failure shows ssh error" expect -c "$STATUS_PRELUDE"'
 spawn tests/preview.sh refused
 see {Connecting to app1[^\n]*FAIL}

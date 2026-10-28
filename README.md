@@ -86,6 +86,15 @@ With `expect` installed, each stage of the connection is reported as it happens:
 
 Jump hosts are read from `~/.ssh/config` (`ProxyJump`, or `ProxyCommand ssh -W ...`). If a password is rejected you're asked for it again; on failure, ssh's error is shown under the failed step.
 
+When the session ends, a closing line says so and, if you didn't log out yourself, why it ended:
+
+```
+[VIPERSSH] Disconnected from app1.dev.example.local
+[VIPERSSH] Disconnected from app1.dev.example.local: logged out for inactivity
+[VIPERSSH] Disconnected from app1.dev.example.local: closed by the server
+[VIPERSSH] Lost connection to app1.dev.example.local: the server stopped responding
+```
+
 ### Expired passwords
 
 If the server says your password has expired, ViperSSH walks you through changing it: it answers the current-password prompt, asks for the new password twice (catching typos before they use up the server's retries), and shows the server's reason if it refuses one. If the server signs you out after the change, ViperSSH reconnects with the new password and offers to save it to the vault.

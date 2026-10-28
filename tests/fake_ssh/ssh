@@ -18,6 +18,9 @@
 #
 # The login password is $FAKE_SSH_PASSWORD (default hunter2). A completed change
 # is written to $FAKE_SSH_STATE so the reconnect logs in with the new one.
+# In the fake shell, "exit" logs out; "idle-logout", "server-gone" and
+# "server-closed" end the session the way an idle timeout (TMOUT), a server
+# that stops responding, or the server closing the connection would.
 
 scenario="${FAKE_SSH_SCENARIO:-ok}"
 dest="${!#}"
@@ -152,6 +155,9 @@ shell() {
         IFS= read -r line || exit 0
         case "$line" in
             exit|logout) echo logout; echo "Connection to $host closed."; exit 0 ;;
+            idle-logout) echo "timed out waiting for input: auto-logout"; echo "Connection to $host closed."; exit 0 ;;
+            server-gone) echo "Timeout, server $host not responding."; exit 255 ;;
+            server-closed) echo "Connection to $host closed by remote host."; exit 255 ;;
             "") ;;
             *) echo "(fake shell) $line" ;;
         esac

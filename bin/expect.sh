@@ -709,10 +709,47 @@ array unset login_password
 
 puts -nonewline "\033]0;$dest\007"
 flush stdout
+
+# Note why the session ends from ssh's (or the remote shell's) last words.
+# Output still reaches the user as it arrives; a reason only counts if the
+# session ends right after it, so the same words in ordinary output don't.
+set disconnect_reason ""
+set disconnect_at 0
 interact {
     -timeout 60 {
         send " \b"
     }
+    -o
+    -nobuffer -re {timed out waiting for input|auto-logout} {
+        set disconnect_reason idle
+        set disconnect_at [clock milliseconds]
+    }
+    -nobuffer -re {closed by remote host} {
+        set disconnect_reason closed
+        set disconnect_at [clock milliseconds]
+    }
+    -nobuffer -re {Timeout, server [^\r\n]* not responding} {
+        set disconnect_reason timeout
+        set disconnect_at [clock milliseconds]
+    }
+    -nobuffer -re {Broken pipe|Connection reset by peer|Connection timed out|Operation timed out} {
+        set disconnect_reason dropped
+        set disconnect_at [clock milliseconds]
+    }
 }
+
+# ==== DISCONNECT ====
+# Closing line to match the opening one
+if {[clock milliseconds] - $disconnect_at > 3000} {
+    set disconnect_reason ""
+}
+switch -- $disconnect_reason {
+    idle    { set color $YELLOW; set line "Disconnected from $CYAN$dest$RESET: ${YELLOW}logged out for inactivity" }
+    closed  { set color $YELLOW; set line "Disconnected from $CYAN$dest$RESET: ${YELLOW}closed by the server" }
+    timeout { set color $RED; set line "Lost connection to $CYAN$dest$RESET: ${RED}the server stopped responding" }
+    dropped { set color $RED; set line "Lost connection to $CYAN$dest$RESET: ${RED}network error" }
+    default { set color $GREEN; set line "Disconnected from $CYAN$dest$RESET" }
+}
+catch {puts "\n$color\[VIPERSSH\]$RESET $line$RESET"}
 
 exit $viper_exit
