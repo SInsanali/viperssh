@@ -323,6 +323,33 @@ send "n\r"
 shell_exit
 '
 
+run_test "Status: IPA refuses the old password, nothing resent" expect -c "$STATUS_PRELUDE"'
+spawn tests/preview.sh expired-ipa-oldpw --vault hunter2
+see {New password: }
+send "Sup3rSecret!\r"
+see {Confirm new password: }
+send "Sup3rSecret!\r"
+see {Changing password[^\n]*FAIL}
+see {Old password not accepted}
+# The login starts over: the refused password must not be sent again on our
+# own (no Authenticating step before the user is asked)
+expect {
+    -re {Authenticating[^\n]*\n[^\n]*Authenticating} { puts "\nresent a refused password"; exit 1 }
+    -re {been refused here[^\n]*\n[^\n]*Password for bob@app1[^:]*: } {}
+    timeout { puts "\nno prompt"; exit 1 }
+}
+# A wrong one typed here is refused, and the re-prompt is a login prompt: not
+# taken for "Current password" and answered with the same password again
+send "wrongpw\r"
+expect {
+    -re {Authenticating[^\n]*OK} { puts "\nre-prompt taken for a current-password prompt"; exit 1 }
+    -re {Authenticating[^\n]*FAIL[^\n]*\n[^\n]*2 passwords have been refused[^\n]*\n[^\n]*Password for bob@app1[^:]*: } {}
+    timeout { puts "\nno second prompt"; exit 1 }
+}
+send "\003"
+expect eof
+'
+
 run_test "Status: IPA refuses a change and hangs up, try again" expect -c "$STATUS_PRELUDE"'
 spawn tests/preview.sh expired-ipa-pw --vault hunter2
 see {New password: }

@@ -8,6 +8,7 @@ import random
 import signal
 import subprocess
 import sys
+import threading
 import time
 from collections import deque
 from pathlib import Path
@@ -2342,12 +2343,27 @@ class ViperApp(App):
             self.exit(result=request)
 
 
-def _handle_post_connection(vault: Vault, env_name: Optional[str], returned_pw: str) -> None:
-    """Save vault password if expect.sh sent one back via pipe."""
-    if not vault.is_enabled() or not vault.is_unlocked() or not env_name:
-        return
-    if returned_pw:
-        vault.set_password(env_name, returned_pw)
+def _vault_save_listener(vault: Vault, env_name: str, pw_read_fd: int, ack_write_fd: int) -> threading.Thread:
+    """Save the password expect.sh sends back, while the session is still up.
+
+    expect.sh writes one newline-terminated password (typed passwords can't hold
+    a newline) when the user agrees to save, then waits for "ok" or "error" on
+    the ack pipe so what it prints is what actually happened. Saving now rather
+    than after the session means closing the terminal mid-session can't lose it.
+    """
+    def run() -> None:
+        with os.fdopen(pw_read_fd, "r") as reader, os.fdopen(ack_write_fd, "w") as ack:
+            line = reader.readline()
+            if not line.endswith("\n"):
+                return  # expect.sh exited without offering a password
+            try:
+                vault.set_password(env_name, line[:-1])
+                ack.write("ok\n")
+            except Exception:
+                ack.write("error\n")
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    return thread
 
 
 def _unlock_vault(vault: Vault) -> None:
@@ -2455,13 +2471,12 @@ def main() -> None:
         print(f"\n\033[1;32m[VIPERSSH]\033[0m Connecting to \033[1;36m{target}\033[0m{mode_label}\n")
 
     run_env = os.environ.copy()
-    returned_pw = ""
-    pw_read_fd = pw_write_fd = -1
+    pw_read_fd = pw_write_fd = ack_read_fd = ack_write_fd = -1
 
     # The vault can only store a password back if it's enabled, unlocked, and
     # we know which environment to key it under. Only then do we wire up the
     # pipe that lets expect.sh prompt to save — otherwise expect.sh would offer
-    # to "save" a password that _handle_post_connection silently discards.
+    # to "save" a password that would be silently discarded.
     vault_active = vault.is_enabled() and vault.is_unlocked() and bool(env_name)
 
     if use_expect:
@@ -2471,24 +2486,35 @@ def main() -> None:
             if pw:
                 run_env["VIPER_PASSWORD"] = pw
 
-        # Create pipe for expect.sh to send back the working password
+        # Pipes for expect.sh to send back the working password and hear
+        # whether it was saved; it names the environment when it asks
         if vault_active:
             pw_read_fd, pw_write_fd = os.pipe()
+            ack_read_fd, ack_write_fd = os.pipe()
             run_env["VIPER_PW_FD"] = str(pw_write_fd)
+            run_env["VIPER_PW_ACK_FD"] = str(ack_read_fd)
+            run_env["VIPER_VAULT_ENV"] = env_name
 
     prev_sigint = signal.signal(signal.SIGINT, signal.SIG_IGN)
 
     if use_expect:
-        pass_fds = (pw_write_fd,) if pw_write_fd != -1 else ()
-        ret = subprocess.call(
+        pass_fds = (pw_write_fd, ack_read_fd) if pw_write_fd != -1 else ()
+        proc = subprocess.Popen(
             [str(expect_script), target, proto],
             env=run_env, pass_fds=pass_fds,
         )
-        # Close write end and read the password back from the pipe
+        saver = None
         if pw_write_fd != -1:
+            # The child has its own copies; ours would keep the pipe from
+            # ever reaching EOF
             os.close(pw_write_fd)
-            with os.fdopen(pw_read_fd, "r") as f:
-                returned_pw = f.read()
+            os.close(ack_read_fd)
+            saver = _vault_save_listener(vault, env_name, pw_read_fd, ack_write_fd)
+        ret = proc.wait()
+        if saver is not None:
+            # Any save finished before expect.sh went on; this only waits for
+            # the listener to see EOF
+            saver.join(timeout=2)
     elif proto == "sftp":
         ret = subprocess.call(["sftp", target])
     else:
@@ -2500,8 +2526,6 @@ def main() -> None:
 
     if use_expect:
         subprocess.call(["stty", "sane"], stderr=subprocess.DEVNULL)
-
-    _handle_post_connection(vault, env_name, returned_pw)
 
 
 if __name__ == "__main__":

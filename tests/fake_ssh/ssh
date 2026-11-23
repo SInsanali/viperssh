@@ -13,6 +13,7 @@
 #   expired-kbdint  forced change inside a keyboard-interactive login (pam_unix)
 #   expired-ipa     IPA keyboard-interactive: a refused change starts the login over
 #   expired-ipa-pw  IPA password auth: a refused change hangs up
+#   expired-ipa-oldpw  IPA refuses the old password at the change, then every login
 #   refused         connection refused
 #   jump-fail       bastion can't be resolved
 #
@@ -53,7 +54,7 @@ fi
 # up on the first refusal.
 ipa=0
 [[ "$scenario" == expired-ipa* ]] && ipa=1
-if [[ "$scenario" == expired-kbdint || "$scenario" == expired-ipa ]]; then
+if [[ "$scenario" == expired-kbdint || "$scenario" == expired-ipa || "$scenario" == expired-ipa-oldpw ]]; then
     style=kbdint
 else
     style=passwd
@@ -112,6 +113,15 @@ change_password() {
         new="$REPLY"
         prompt "$p_retype"
         pause
+        if [[ "$scenario" == expired-ipa-oldpw ]]; then
+            # kpasswd turns the old password down (sssd's wording); from here
+            # on the account takes no password, as when it is locked
+            echo "Password change failed. Server message: Old password not accepted."
+            echo
+            echo "Password not changed."
+            password="locked:$RANDOM$RANDOM"
+            return 1
+        fi
         if [[ "$REPLY" != "$new" ]] || (( ${#new} < 8 )); then
             echo "Password change failed. Server message: Password is too short"
             echo

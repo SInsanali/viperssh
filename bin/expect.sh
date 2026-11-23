@@ -24,6 +24,11 @@ set cached_password ""
 set known_passwords {}
 array set login_password {}
 
+# Per login, the passwords it has turned down this run. They are never sent
+# there again on our own, since each one is a failed attempt that counts
+# toward the account's lockout.
+array set refused_password {}
+
 # Vault password tracking
 set vault_password ""
 set vault_password_used 0
@@ -310,6 +315,38 @@ proc password_worked {id pw} {
     set known_passwords [linsert [lsearch -all -inline -not -exact $known_passwords $pw] 0 $pw]
 }
 
+# Login $id turned $pw down: stop offering it there
+proc password_refused {id pw} {
+    global login_password refused_password vault_password vault_password_used vault_password_failed YELLOW
+    if {$pw eq "" || [is_refused $id $pw]} {
+        return
+    }
+    lappend refused_password($id) $pw
+    if {[info exists login_password($id)] && $login_password($id) eq $pw} {
+        unset login_password($id)
+    }
+    if {$vault_password_used && !$vault_password_failed && $pw eq $vault_password && [is_target $id]} {
+        set vault_password_failed 1
+        say "Saved password was rejected." $YELLOW
+    }
+}
+
+proc is_refused {id pw} {
+    global refused_password
+    return [expr {[info exists refused_password($id)] && $pw in $refused_password($id)}]
+}
+
+# Before the user types another password for $id, say how many it has turned
+# down, so nobody walks into a lockout without noticing
+proc lockout_warning {id} {
+    global refused_password YELLOW
+    if {![info exists refused_password($id)]} {
+        return
+    }
+    set n [llength $refused_password($id)]
+    say "[expr {$n == 1 ? "1 password has" : "$n passwords have"}] been refused here; repeated failures can lock the account. Ctrl+C to stop." $YELLOW
+}
+
 # Answer a login prompt for $id. A login gets the password that last worked
 # for it (the target: the saved one), then any other that has worked this run
 # (a jump host may or may not share the target's), and only then is the user
@@ -318,8 +355,7 @@ proc password_worked {id pw} {
 # next hop's, so with a jump only the third in a row counts.
 proc answer_login {id denied} {
     global step_kind auth_id auth_who auth_streak tried sent_password jump_via cached_password
-    global known_passwords login_password vault_password vault_password_used vault_password_failed
-    global new_password YELLOW DIM
+    global known_passwords login_password new_password DIM
 
     if {$id eq $auth_id} {
         incr auth_streak
@@ -330,11 +366,7 @@ proc answer_login {id denied} {
     set retry [expr {$step_kind eq "auth" && ($denied || $again)}]
     if {$retry} {
         step_done FAIL
-        if {$vault_password_used && !$vault_password_failed && $sent_password eq $vault_password && [is_target $id]} {
-            # Saved password rejected, ask the user
-            set vault_password_failed 1
-            say "Saved password was rejected." $YELLOW
-        }
+        password_refused $auth_id $sent_password
         set auth_streak 1
     } else {
         set tried {}
@@ -356,7 +388,7 @@ proc answer_login {id denied} {
     }
     set password ""
     foreach pw $candidates {
-        if {$pw ni $tried} {
+        if {$pw ni $tried && ![is_refused $id $pw]} {
             set password $pw
             break
         }
@@ -364,6 +396,7 @@ proc answer_login {id denied} {
     if {$password ne "" && $retry} {
         say [expr {$password eq $new_password ? "Trying your new password." : "Trying another password from this session."}] $DIM
     } elseif {$password eq ""} {
+        lockout_warning $id
         set password [read_password [expr {$who eq "" ? "Password" : "Password for $who"}]]
         # Debug (uncomment to trace user-typed password):
         # set _sum 0; foreach _c [split $password ""] { scan $_c %c _code; incr _sum $_code }
@@ -391,9 +424,10 @@ proc password_expired {} {
 }
 
 # The server refused the new password: show its reason. The old password
-# still stands.
+# still stands - unless the server says it was the old one it refused (sssd's
+# "Old password not accepted"), in which case it won't be sent again.
 proc change_refused {before} {
-    global change_stage RED
+    global change_stage expiry_notice auth_id sent_password RED
     step_done FAIL
     set reason [server_lines $before]
     if {$reason eq ""} {
@@ -402,19 +436,28 @@ proc change_refused {before} {
     foreach line $reason {
         say $line $RED
     }
+    if {[regexp -nocase {\m(old|current) password\M} [join $reason "\n"]]} {
+        password_refused $auth_id $sent_password
+    }
+    # The change is over. A server that starts the login over will say again
+    # if the password is still expired; until then a bare "Password:" is a
+    # login prompt, not a request for the current password.
+    set expiry_notice 0
     set change_stage ""
 }
 
 # "Current password:" - the one we just logged in with, unless it was already
 # turned down here
 proc send_current_password {} {
-    global change_stage sent_password RED
+    global change_stage sent_password auth_id RED
     password_expired
     if {$change_stage eq "current"} {
         say "Current password was rejected." $RED
+        password_refused $auth_id $sent_password
         set sent_password ""
     }
-    if {$sent_password eq ""} {
+    if {$sent_password eq "" || [is_refused $auth_id $sent_password]} {
+        lockout_warning $auth_id
         set sent_password [read_password "Current password"]
     }
     set change_stage current
@@ -664,39 +707,55 @@ if {$vault_password_used && $cached_password ne $vault_password} {
     set viper_exit 11
 }
 
-# Prompt to save/update password right after successful login
+# Prompt to save/update password right after successful login. The vault
+# keeps one password per environment, so the prompt and result name it.
 if {[info exists env(VIPER_PW_FD)] && $cached_password ne ""} {
     set pw_fd $env(VIPER_PW_FD)
+    set vault_env [expr {[info exists env(VIPER_VAULT_ENV)] ? $env(VIPER_VAULT_ENV) : ""}]
+    set env_label [expr {$vault_env eq "" ? "" : " for $CYAN$vault_env$RESET"}]
     set should_prompt 0
 
     if {$viper_exit == 11} {
         # User typed password manually, vault has no saved pw for this env
         set should_prompt 1
-        set prompt_msg "\n$MAGENTA\[VAULT\]$RESET Save password? (y/n) "
+        set prompt_msg "\n$MAGENTA\[VAULT\]$RESET Save password$env_label? (y/n) "
+        set done_msg "Saved the password$env_label."
     } elseif {$viper_exit == 12} {
         # Vault password failed or was changed, user has a new one
         set should_prompt 1
-        set prompt_msg "\n$MAGENTA\[VAULT\]$RESET Update saved password? (y/n) "
+        set prompt_msg "\n$MAGENTA\[VAULT\]$RESET Update saved password$env_label? (y/n) "
+        set done_msg "Updated the saved password$env_label."
     }
 
     if {$should_prompt} {
         if {[ask_yes $prompt_msg]} {
-            # Debug (uncomment to trace pipe write):
-            # set _sum 0; foreach _c [split $cached_password ""] { scan $_c %c _code; incr _sum $_code }
-            # puts "\[DEBUG\] writing to pipe: len=[string length $cached_password] sum=$_sum"
+            # One line per password (typed ones can't contain a newline); viper
+            # saves it and answers "ok" or "error" on the ack pipe
+            set status ""
             if {[catch {
                 set chan [open "/dev/fd/$pw_fd" w]
-                puts -nonewline $chan $cached_password
+                puts $chan $cached_password
                 close $chan
-            } err]} {
-                puts "$MAGENTA\[VAULT\]$RESET Failed to save: $err"
+                if {[info exists env(VIPER_PW_ACK_FD)]} {
+                    set ack [open "/dev/fd/$env(VIPER_PW_ACK_FD)" r]
+                    gets $ack status
+                    close $ack
+                } else {
+                    # No one to confirm (tests/preview.sh)
+                    set status ok
+                }
+            }]} {
+                set status error
+            }
+            if {$status eq "ok"} {
+                puts "$MAGENTA\[VAULT\]$RESET $done_msg"
             } else {
-                puts "$MAGENTA\[VAULT\]$RESET Saved."
+                puts "$MAGENTA\[VAULT\]$RESET ${RED}Couldn't save the password; the vault was not changed.$RESET"
             }
         }
     }
 
-    unset -nocomplain env(VIPER_PW_FD)
+    unset -nocomplain env(VIPER_PW_FD) env(VIPER_PW_ACK_FD) env(VIPER_VAULT_ENV)
 }
 
 # Clear passwords from memory before interactive mode
@@ -706,6 +765,7 @@ set sent_password ""
 set vault_password ""
 set known_passwords {}
 array unset login_password
+array unset refused_password
 
 puts -nonewline "\033]0;$dest\007"
 flush stdout
